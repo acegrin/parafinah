@@ -9,7 +9,7 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -84,13 +84,13 @@ DATABASES = {
 }
 
 GITHUB_ASSETS = {
-    "REPO": "chef-de-poste/parafinah-assets",
+    "REPO": "acegrin/parafinah-assets",
     "BRANCH": "main",
-    "TOKEN": "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",
-    "BASE_URL": "https://raw.githubusercontent.com/chef-de-poste/parafinah-assets/main/",
+    "TOKEN": os.getenv("GITHUB_ASSETS_TOKEN"),
+    "BASE_URL": "https://raw.githubusercontent.com/acegrin/parafinah-assets/main/",
 }
 
-ASSET_BUNDLE_BASE_URL = "https://chef-de-poste.github.io/ShakaJuniorRunnerAddressables/android/"
+ASSET_BUNDLE_BASE_URL = "https://acegrin.github.io/ShakaJuniorRunnerAddressables/android/"
 
 DEFAULT_FILE_STORAGE = "core.storage.github.GitHubStorage"
 
