@@ -83,6 +83,7 @@ DATABASES = {
     }
 }
 
+# New
 GITHUB_ASSETS = {
     "REPO": "acegrin/parafinah-assets",
     "BRANCH": "main",
