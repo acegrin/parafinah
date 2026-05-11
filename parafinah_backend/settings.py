@@ -20,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = "django-insecure-gz^v9s$px(^c-)r0dnoh9!5l2v7o+fgj_w9!v8k+jupro=cuv3"
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -82,6 +83,13 @@ DATABASES = {
     }
 }
 
+GITHUB_ASSETS = {
+    "REPO": "chef-de-poste/parafinah-assets",
+    "BRANCH": "main",
+    "TOKEN": "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",
+    "BASE_URL": "https://raw.githubusercontent.com/chef-de-poste/parafinah-assets/main/",
+}
+
 ASSET_BUNDLE_BASE_URL = "https://chef-de-poste.github.io/ShakaJuniorRunnerAddressables/android/"
 
 DEFAULT_FILE_STORAGE = "core.storage.github.GitHubStorage"
@@ -137,3 +145,4 @@ STATIC_URL = '/static/'
 SITE_URL = "https://parafinah.pythonanywhere.com"
 
 FIREBASE_SERVICE_ACCOUNT = BASE_DIR / "firebase-service-account.json"
+

@@ -76,7 +76,7 @@ def mark_notification_read(request):
 @api_view(["POST"])
 def initialize_player_data(request):
     user_id = request.data.get("userId")
-
+    print(f"UserID: {user_id}!!!!!!!!!!!!!!!!!!!!!!!!!1")
     if not user_id:
         return Response({"error": "Missing userId"}, status=400)
 

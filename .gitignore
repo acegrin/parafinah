@@ -1,4 +1,5 @@
 firebase-key.json
+firebase_key.json
 firebase-service-account.json
 .env
 *.pem
