@@ -1,0 +1,9 @@
+firebase-key.json
+firebase-service-account.json
+.env
+*.pem
+__pycache__/
+*.pyc
+venv/
+env/
+db.sqlite3

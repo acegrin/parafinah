@@ -1,0 +1,7 @@
+from enum import Enum
+
+class NotificationType(str, Enum):
+    LEADERBOARD_REWARD = "LEADERBOARD_REWARD"
+    SYSTEM_MESSAGE = "SYSTEM_MESSAGE"
+    COMPENSATION = "COMPENSATION"
+    DAILY_REWARD = "DAILY_REWARD"

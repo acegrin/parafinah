@@ -1,0 +1,23 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block content %}
+<h1>Mission Preview</h1>
+
+<h2>{{ preview.title }}</h2>
+<img src="{{ preview.image.url }}" alt="Mission Image" width="200">
+
+<h3>Requirements</h3>
+<pre>{{ preview.requirements|safe }}</pre>
+
+<h3>Rewards</h3>
+<pre>{{ preview.rewards|safe }}</pre>
+
+<form method="post" action="{% url 'admin:mission-confirm' %}" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="preview_data" value="{{ preview|safe|escapejs }}">
+    <input type="file" name="image" required>
+    <input type="submit" value="Save Mission">
+</form>
+
+{% endblock %}

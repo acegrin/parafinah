@@ -1,0 +1,50 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Rider ignored files
+/projectSettingsUpdater.xml
+/modules.xml
+/contentModel.xml
+/.idea.parafinah.iml
+# Ignored default folder with query files
+/queries/
+# Datasource local storage ignored files
+/dataSources/
+/dataSources.local.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+
+# Byte-compiled / cached Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# PythonAnywhere environment files / local env
+.env
+.env.*
+
+# Logs
+*.log
+
+# Database files (if any SQLite dbs exist)
+*.sqlite3
+*.db
+
+# IDE files (Rider / JetBrains)
+.idea/
+*.iml
+
+# Static files (if collected for production)
+staticfiles/
+media/
+
+# OS / editor specific
+.DS_Store
+Thumbs.db

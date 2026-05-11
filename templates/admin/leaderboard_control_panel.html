@@ -1,0 +1,18 @@
+{% extends "admin/change_list.html" %}
+
+{% block content %}
+<h1>Leaderboard Control Panel</h1>
+<form method="post">{% csrf_token %}
+    <label>Period:</label>
+    <select name="period">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+    </select>
+    <br><br>
+    <label><input type="checkbox" name="is_locked"> Lock Period</label><br>
+    <label><input type="checkbox" name="is_finalized"> Finalize Period</label><br>
+    <label><input type="checkbox" name="distribute_rewards_toggle"> Distribute Rewards</label><br><br>
+    <button type="submit">Apply</button>
+</form>
+{% endblock %}
