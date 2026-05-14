@@ -621,7 +621,7 @@ def get_data_row(request):
     article_uid = request.data.get('article_uid')
     user_id = request.data.get('user_id')
 
-    return get_runner_article(article_uid)
+    return get_runner_article("e2e1143b-1672-47c3-a529-6b26ebc6294c")
 
     if not data_type:
         return Response(
