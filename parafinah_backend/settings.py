@@ -89,10 +89,10 @@ DATABASES = {
 
 # New
 GITHUB_ASSETS = {
-    "REPO": "acegrin/parafinah-assets",
+    "REPO": "acegrin/parafinah-storage",
     "BRANCH": "main",
     "TOKEN": os.getenv("GITHUB_ASSETS_TOKEN"),
-    "BASE_URL": "https://raw.githubusercontent.com/acegrin/parafinah-assets/main/",
+    "BASE_URL": "https://raw.githubusercontent.com/acegrin/parafinah-storage/main/",
 }
 
 ASSET_BUNDLE_BASE_URL = "https://acegrin.github.io/parafinah-assets/Android/"
