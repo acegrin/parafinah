@@ -91,7 +91,7 @@ GITHUB_ASSETS = {
     "BASE_URL": "https://raw.githubusercontent.com/acegrin/parafinah-assets/main/",
 }
 
-ASSET_BUNDLE_BASE_URL = "https://acegrin.github.io/ShakaJuniorRunnerAddressables/android/"
+ASSET_BUNDLE_BASE_URL = "https://acegrin.github.io/parafinah-assets/Android/"
 
 DEFAULT_FILE_STORAGE = "core.storage.github.GitHubStorage"
 
