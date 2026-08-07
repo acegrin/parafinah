@@ -721,10 +721,6 @@ class WorldEntry(models.Model):
 
     is_active = models.BooleanField(default=True)
 
-    power = models.FloatField(default=1.0)
-    speed = models.FloatField(default=1.0)
-    stamina = models.FloatField(default=1.0)
-
     def to_dict(self):
         return {
             "id": self.id,
