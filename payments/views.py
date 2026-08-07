@@ -29,7 +29,7 @@ from .notification_system import get_notification_manifest, get_notification_art
 from .objective_system import get_objectives_manifest, get_objectives_article
 from .package_system import get_package_manifest, get_package_article
 from .runner_system import get_runner_manifest, get_runner_article
-from .templates.world_system import get_world_article
+from .templates.world_system import get_world_article, get_world_manifest
 
 firestore_client = firestore.client()
 
@@ -676,6 +676,8 @@ def get_data_manifest(request):
         return Response(get_mission_manifest(current_manifest_version))
     if data_type == "runner":
         return Response(get_runner_manifest(current_manifest_version))
+    if data_type == "world":
+        return Response(get_world_manifest(current_manifest_version))
     if data_type == "event":
         return Response(get_events_manifest(current_manifest_version))
     if data_type == "package":
