@@ -641,8 +641,8 @@ def get_data_row(request):
         return get_mission_article(article_uid)
     if data_type == "runner":
         return get_runner_article(article_uid)
-    if data_type == "world":
-        return get_world_article(article_uid)
+    # if data_type == "world":
+    #     return get_world_article(article_uid)
     if data_type == "event":
         return get_events_article(article_uid)
     if data_type == "package":
