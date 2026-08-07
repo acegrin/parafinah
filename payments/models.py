@@ -724,7 +724,7 @@ class WorldEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     is_active = models.BooleanField(default=True)
-    # New code
+
     def to_dict(self):
         return {
             "id": self.id,
