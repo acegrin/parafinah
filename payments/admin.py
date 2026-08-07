@@ -5,7 +5,7 @@ from django.shortcuts import render, redirect
 from django import forms
 from django.core.exceptions import ValidationError
 from .models import RunnerEntry, LevelConfig, EventEntry, NotificationEntry, NewsEntry, NewsManifestState, \
-    DataManifestStateEntry, PackageEntry
+    DataManifestStateEntry, PackageEntry, WorldEntry
 from .admin_forms import MissionGeneratorForm
 from .mission_system import build_mission_preview, save_mission_from_preview
 from .validation import bump_validation_code
@@ -283,35 +283,35 @@ class RunnerEntryAdmin(admin.ModelAdmin):
         "updated_at",
     )
 
-# @admin.register(WorldEntry)
-# class WorldEntryAdmin(admin.ModelAdmin):
-#     list_display = (
-#         "name",
-#         "version",
-#         "is_active",
-#         "updated_at",
-#     )
-#
-#     list_filter = (
-#         "is_active",
-#         "updated_at",
-#         "version",
-#     )
-#
-#     search_fields = (
-#         "name",
-#         "description",
-#     )
-#
-#     ordering = (
-#         "-updated_at",
-#     )
-#
-#     readonly_fields = (
-#         "id",
-#         "created_at",
-#         "updated_at",
-#     )
+@admin.register(WorldEntry)
+class WorldEntryAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "version",
+        "is_active",
+        "updated_at",
+    )
+
+    list_filter = (
+        "is_active",
+        "updated_at",
+        "version",
+    )
+
+    search_fields = (
+        "name",
+        "description",
+    )
+
+    ordering = (
+        "-updated_at",
+    )
+
+    readonly_fields = (
+        "id",
+        "created_at",
+        "updated_at",
+    )
 
 # ---------- MissionAdmin ----------
 @admin.register(Mission)
