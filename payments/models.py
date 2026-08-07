@@ -709,11 +709,7 @@ class RunnerEntry(models.Model):
         ordering = ["created_at", "updated_at"]
 
 class WorldEntry(models.Model):
-    id = models.UUIDField(
-        primary_key=True,
-        default=uuid.uuid4,
-        editable=False
-    )
+    id = models.UUIDField( primary_key=True,default=uuid.uuid4,editable=False)
 
     name = models.CharField(max_length=128, unique=True)
     description = models.TextField()
@@ -724,7 +720,11 @@ class WorldEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     is_active = models.BooleanField(default=True)
-    # New code
+
+    power = models.FloatField(default=1.0)
+    speed = models.FloatField(default=1.0)
+    stamina = models.FloatField(default=1.0)
+
     def to_dict(self):
         return {
             "id": self.id,
