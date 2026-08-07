@@ -708,6 +708,46 @@ class RunnerEntry(models.Model):
     class Meta:
         ordering = ["created_at", "updated_at"]
 
+class WorldEntry(models.Model):
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+
+    name = models.CharField(max_length=128, unique=True)
+    description = models.TextField()
+
+    version = models.PositiveIntegerField(default=1)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    is_active = models.BooleanField(default=True)
+    # New code
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "icon_url": f"https://acegrin.github.io/parafinah-assets/Android/{self.id}.png",
+            "bundle_url": f"https://acegrin.github.io/parafinah-assets/Android/{self.id}",
+            "description": self.description,
+            "version": self.version,
+            "created_at": int(self.created_at.timestamp()),
+            "updated_at": int(self.updated_at.timestamp()),
+            "is_active": self.is_active,
+        }
+
+    def bump(self):
+        self.version += 1
+        self.save(update_fields=["version", "updated_at"])
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ["created_at", "updated_at"]
+
 class PackageEntry(models.Model):
     package_id = models.UUIDField(
         primary_key=True,
