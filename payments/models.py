@@ -725,8 +725,8 @@ class WorldEntry(models.Model):
         return {
             "id": self.id,
             "name": self.name,
-            "icon_url": f"https://acegrin.github.io/parafinah-assets/Android/world/{self.id}.png",
-            "bundle_url": f"https://acegrin.github.io/parafinah-assets/Android/world/{self.id}",
+            "icon_url": f"https://acegrin.github.io/parafinah-assets/Android/World/{self.id}.png",
+            "bundle_url": f"https://acegrin.github.io/parafinah-assets/Android/World/{self.id}",
             "description": self.description,
             "version": self.version,
             "created_at": int(self.created_at.timestamp()),
