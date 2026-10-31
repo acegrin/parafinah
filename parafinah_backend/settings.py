@@ -10,8 +10,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # Security settings
-SECRET_KEY = os.getenv["SECRET_KEY"]
-CONTROL_CENTER_API_KEY = os.getenv["CONTROL_CENTER_API_KEY"]
+SECRET_KEY = os.getenv("SECRET_KEY")
+CONTROL_CENTER_API_KEY = os.getenv("CONTROL_CENTER_API_KEY")
 
 DEBUG = True  # Change to False on the production server.
 ALLOWED_HOSTS = ['parafinah.pythonanywhere.com']
