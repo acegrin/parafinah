@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework import status
 
 from .models import EventEntry, DataManifestStateEntry
+from django.conf import settings
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 def control_center_authenticated(request):
-	expected_key = os.environ.get("CONTROL_CENTER_API_KEY")
+	expected_key = settings.CONTROL_CENTER_API_KEY
 
 	if not expected_key:
 		return False, Response(

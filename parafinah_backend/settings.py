@@ -1,4 +1,6 @@
 
+#settings.py
+
 import os
 from pathlib import Path
 from dotenv import load_dotenv
@@ -9,9 +11,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load secrets from the .env file in the project root.
 load_dotenv(BASE_DIR / ".env")
 
-# Security settings
-SECRET_KEY = "django-insecure-gz^v9s$px(^c-)r0dnoh9!5l2v7o+fgj_w9!v8k+jupro=cuv3"
-CONTROL_CENTER_API_KEY = os.getenv("CONTROL_CENTER_API_KEY")
+CONTROL_CENTER_API_KEY = os.environ["CONTROL_CENTER_API_KEY"]
+SECRET_KEY = os.environ["SECRET_KEY"]
 
 DEBUG = True  # Change to False on the production server.
 ALLOWED_HOSTS = ['parafinah.pythonanywhere.com']
