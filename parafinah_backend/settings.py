@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 CONTROL_CENTER_API_KEY = os.environ["CONTROL_CENTER_API_KEY"]
-SECRET_KEY = os.environ["SECRET_KEY"]
+SECRET_KEY = "django-insecure-gz^v9s$px(^c-)r0dnoh9!5l2v7o+fgj_w9!v8k+jupro=cuv3"
 
 DEBUG = True  # Change to False on the production server.
 ALLOWED_HOSTS = ['parafinah.pythonanywhere.com']
