@@ -6,6 +6,7 @@ from .views import mark_notification_read, purchase_item, get_server_date, colle
     get_data_row, get_data_manifest
 from .validation import validation_data_listener, fetch_data, invalidate_runners
 from .notification_system import delete_notification
+from .event_admin import create_event, update_event, delete_event
 
 urlpatterns = [
     path('purchase_item/', purchase_item, name='purchase_item'),
@@ -26,4 +27,7 @@ urlpatterns = [
     path("get_data_manifest/", get_data_manifest, name="get_data_manifest"),
     path("get_data_row/", get_data_row, name="get_data_row"),
     path("invalidate_runners/", invalidate_runners, name="invalidate_runners"),
+	path( "control_center/events/create/", create_event, name="control_center_create_event" ),
+	path( "control_center/events/update/", update_event, name="control_center_update_event" ),
+	path( "control_center/events/delete/", delete_event, name="control_center_delete_event" ),
 ]
