@@ -1,3 +1,5 @@
+#urls.py
+
 from django.urls import path
 
 from .news_system import get_news_article

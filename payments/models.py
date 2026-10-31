@@ -479,7 +479,7 @@ class Mission(models.Model):
             "resolution_mode": self.resolution_mode,
             "banner": self.banner_url,
             "start_time": int(self.start_time.timestamp()),
-            "end_time": int(self.end_time.timestamp()),
+            "end_time": ( int(self.end_time.timestamp()) if self.end_time else None ),
             "progress_definition": self.progress_definition,
             "target_value": self.target_value,
             "rewards": self.rewards,
