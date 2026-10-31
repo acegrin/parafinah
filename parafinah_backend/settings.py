@@ -8,13 +8,13 @@ from dotenv import load_dotenv
 # Build paths inside the project.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load secrets from the .env file in the project root.
-load_dotenv(BASE_DIR / ".env")
+# Security settings
+load_dotenv(Path("/home/parafinah/.env"))
 
-CONTROL_CENTER_API_KEY = os.environ["CONTROL_CENTER_API_KEY"]
 SECRET_KEY = os.environ["SECRET_KEY"]
+CONTROL_CENTER_API_KEY = os.environ["CONTROL_CENTER_API_KEY"]
 
-DEBUG = True  # Change to False on the production server.
+DEBUG = True
 ALLOWED_HOSTS = ['parafinah.pythonanywhere.com']
 
 
