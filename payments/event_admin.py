@@ -457,14 +457,11 @@ def update_event(request):
 			# Determine which old files are no longer in use.
 			files_to_delete = []
 
-			for storage, filename in old_files:
-				still_used = (
-					event.banner.name == filename
-					if storage == event.banner.storage
-					else event.image.name == filename
-				)
+			for field_name, storage, filename in old_files:
 
-				if not still_used:
+				current_file = getattr(event, field_name)
+
+				if not current_file or current_file.name != filename:
 					files_to_delete.append(
 						(storage, filename)
 					)
