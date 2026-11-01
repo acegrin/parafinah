@@ -10,6 +10,7 @@ from .validation import validation_data_listener, fetch_data, invalidate_runners
 from .notification_system import delete_notification
 from .event_admin import create_event, update_event, delete_event
 from .mission_admin import create_mission, update_mission, delete_mission
+from .runner_admin import create_runner, update_runner, delete_runner
 
 urlpatterns = [
     path('purchase_item/', purchase_item, name='purchase_item'),
@@ -37,4 +38,8 @@ urlpatterns = [
 	path("control_center/missions/create/", create_mission, name="control_center_create_mission"),
 	path("control_center/missions/update/", update_mission, name="control_center_update_mission"),
 	path("control_center/missions/delete/", delete_mission, name="control_center_delete_mission"),
+	
+	path("control_center/runners/create/", create_runner, name="control_center_create_runner"),
+	path("control_center/runners/update/", update_runner, name="control_center_update_runner"),
+	path("control_center/runners/delete/", delete_runner, name="control_center_delete_runner"),
 ]
