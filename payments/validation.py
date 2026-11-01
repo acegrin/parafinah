@@ -22,103 +22,103 @@ from .runner_system import resolve_runner_data
 
 
 def bump_validation_code(identifier: str):
-    entry, _ = ValidationEntry.objects.get_or_create(
-        identifier=identifier,
-        defaults={"validation_code": uuid.uuid4().hex},
-    )
+	entry, _ = ValidationEntry.objects.get_or_create(
+		identifier=identifier,
+		defaults={"validation_code": uuid.uuid4().hex},
+	)
 
-    entry.validation_code = uuid.uuid4().hex
-    entry.save(update_fields=["validation_code"])
+	entry.validation_code = uuid.uuid4().hex
+	entry.save(update_fields=["validation_code"])
 
 
 
 @api_view(['POST'])
 def validation_data_listener(request):
-    """
-    Unity calls this endpoint to validate a user's economy events
-    and apply gold to the player's document in Firebase Firestore.
-    """
-    identifier = request.data.get("Identifier")
+	"""
+	Unity calls this endpoint to validate a user's economy events
+	and apply gold to the player's document in Firebase Firestore.
+	"""
+	identifier = request.data.get("Identifier")
 
-    if not identifier:
-        return Response(
-            {"error": "identifier is required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+	if not identifier:
+		return Response(
+			{"error": "identifier is required"},
+			status=status.HTTP_400_BAD_REQUEST,
+		)
 
-    try:
-        entry = ValidationEntry.objects.get(identifier=identifier)
-    except ValidationEntry.DoesNotExist:
-        return Response(
-            {"error": "Identifier not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
+	try:
+		entry = ValidationEntry.objects.get(identifier=identifier)
+	except ValidationEntry.DoesNotExist:
+		return Response(
+			{"error": "Identifier not found"},
+			status=status.HTTP_404_NOT_FOUND,
+		)
 
-    return Response(
-        {
-            "Identifier": entry.identifier,
-            "ValidationCode": entry.validation_code,
-        },
-        status=status.HTTP_200_OK,
-    )
+	return Response(
+		{
+			"Identifier": entry.identifier,
+			"ValidationCode": entry.validation_code,
+		},
+		status=status.HTTP_200_OK,
+	)
 
 
 @api_view(["POST"])
 def get_validation_code(request):
-    identifier = request.data.get("identifier")
+	identifier = request.data.get("identifier")
 
-    if not identifier:
-        return Response(
-            {"error": "identifier is required"},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
+	if not identifier:
+		return Response(
+			{"error": "identifier is required"},
+			status=status.HTTP_400_BAD_REQUEST,
+		)
 
-    try:
-        entry = ValidationEntry.objects.get(identifier=identifier)
-    except ValidationEntry.DoesNotExist:
-        return Response(
-            {"error": "Identifier not found"},
-            status=status.HTTP_404_NOT_FOUND,
-        )
+	try:
+		entry = ValidationEntry.objects.get(identifier=identifier)
+	except ValidationEntry.DoesNotExist:
+		return Response(
+			{"error": "Identifier not found"},
+			status=status.HTTP_404_NOT_FOUND,
+		)
 
-    return Response(
-        {
-            "identifier": entry.identifier,
-            "validation_code": entry.validation_code,
-        },
-        status=status.HTTP_200_OK,
-    )
+	return Response(
+		{
+			"identifier": entry.identifier,
+			"validation_code": entry.validation_code,
+		},
+		status=status.HTTP_200_OK,
+	)
 
 @api_view(["POST"])
 def fetch_data(request):
-    identifier = request.data.get("identifier")
+	identifier = request.data.get("identifier")
 
-    server_data = []
+	server_data = []
 	if identifier == "RUNNER_DATA":
-        server_data = resolve_runner_data()
-    elif identifier == "MISSION_DATA":
-        server_data = resolve_mission_data()
-    elif identifier == "EVENT_DATA":
-        server_data = resolve_event_data()
-    elif identifier == "OBJECTIVES_DATA":
-        server_data = resolve_objectives_data()
-    elif identifier == "NOTIFICATION_DATA":
-        server_data = notification_system.resolve_notification_data(request.data.get("user_id"))
-    elif identifier == "NEWS_DATA":
-        server_data = news_system.resolve_news_data()
-    return Response(
-        {
-            "data": server_data
-        },
-        status=status.HTTP_200_OK
-    )
+		server_data = resolve_runner_data()
+	elif identifier == "MISSION_DATA":
+		server_data = resolve_mission_data()
+	elif identifier == "EVENT_DATA":
+		server_data = resolve_event_data()
+	elif identifier == "OBJECTIVES_DATA":
+		server_data = resolve_objectives_data()
+	elif identifier == "NOTIFICATION_DATA":
+		server_data = notification_system.resolve_notification_data(request.data.get("user_id"))
+	elif identifier == "NEWS_DATA":
+		server_data = news_system.resolve_news_data()
+	return Response(
+		{
+			"data": server_data
+		},
+		status=status.HTTP_200_OK
+	)
 
 @api_view(["GET"])
 def invalidate_runners(request):
-    # identifier = request.data.get("identifier")
-    for runner in RunnerEntry.objects.all():
-        runner.bump()
+	# identifier = request.data.get("identifier")
+	for runner in RunnerEntry.objects.all():
+		runner.bump()
 
-    DataManifestStateEntry.objects.get(data_type="runner").bump()
+	DataManifestStateEntry.objects.get(data_type="runner").bump()
 
-    return Response({"message": f"Invalidated runners new version {DataManifestStateEntry.objects.get(data_type="runner").version}"})
+	return Response({"message": f"Invalidated runners new version {DataManifestStateEntry.objects.get(data_type="runner").version}"})
