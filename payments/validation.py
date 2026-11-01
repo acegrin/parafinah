@@ -113,12 +113,50 @@ def fetch_data(request):
 		status=status.HTTP_200_OK
 	)
 
-@api_view(["GET"])
+@api_view(["POST"])
 def invalidate_runners(request):
-	# identifier = request.data.get("identifier")
-	for runner in RunnerEntry.objects.all():
+	scope = request.data.get("scope", "all")
+
+	if scope == "all":
+		runners = RunnerEntry.objects.all()
+
+		for runner in runners:
+			runner.bump()
+
+		count = runners.count()
+
+		message = f"Invalidated all {count} runners."
+
+	elif scope == "runner":
+		runner_id = request.data.get("runner_id")
+
+		if not runner_id:
+			return Response(
+				{"error": "runner_id is required."},
+				status=400
+			)
+
+		try:
+			runner = RunnerEntry.objects.get(id=runner_id)
+		except (RunnerEntry.DoesNotExist, ValueError):
+			return Response(
+				{"error": "Runner not found."},
+				status=404
+			)
+
 		runner.bump()
+		message = f"Invalidated runner '{runner.name}'."
 
-	DataManifestStateEntry.objects.get(data_type="runner").bump()
+	else:
+		return Response(
+			{"error": "Invalid scope. Use 'all' or 'runner'."},
+			status=400
+		)
 
-	return Response({"message": f"Invalidated runners new version {DataManifestStateEntry.objects.get(data_type="runner").version}"})
+	manifest = DataManifestStateEntry.objects.get(data_type="runner")
+	manifest.bump()
+
+	return Response({
+		"message": message,
+		"manifest_version": manifest.version
+	})
