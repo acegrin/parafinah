@@ -18,6 +18,7 @@ from dateutil.parser import parse
 
 from .models import ValidationEntry, RunnerEntry, DataManifestStateEntry
 from .mission_system import resolve_mission_data, resolve_event_data, resolve_objectives_data
+from .runner_system import resolve_runner_data
 
 
 def bump_validation_code(identifier: str):
@@ -93,8 +94,9 @@ def fetch_data(request):
     identifier = request.data.get("identifier")
 
     server_data = []
-
-    if identifier == "MISSION_DATA":
+	if identifier == "RUNNER_DATA":
+        server_data = resolve_runner_data()
+    elif identifier == "MISSION_DATA":
         server_data = resolve_mission_data()
     elif identifier == "EVENT_DATA":
         server_data = resolve_event_data()

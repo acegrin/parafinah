@@ -47,3 +47,9 @@ def get_runner_article(article_uid):
         raise Http404("Article not found")
 
     return JsonResponse(article.to_dict())
+    
+def resolve_runner_data():
+    """
+    API-safe export.
+    """
+    return [m.to_dict() for m in RunnerEntry.objects.all()]
