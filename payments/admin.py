@@ -5,7 +5,7 @@ from django.shortcuts import render, redirect
 from django import forms
 from django.core.exceptions import ValidationError
 from .models import RunnerEntry, LevelConfig, EventEntry, NotificationEntry, NewsEntry, NewsManifestState, \
-    DataManifestStateEntry, PackageEntry, WorldEntry, EventParticipationAdmin
+    DataManifestStateEntry, PackageEntry, WorldEntry, EventParticipation
 from .admin_forms import MissionGeneratorForm
 from .mission_system import build_mission_preview, save_mission_from_preview
 from .validation import bump_validation_code
