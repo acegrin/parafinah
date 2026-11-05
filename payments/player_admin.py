@@ -1,124 +1,115 @@
 
-# player_admin.py
-
 import logging
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from .firebase_client import db
+from .firebase_client import db, firebase_auth
 from .event_admin import control_center_authenticated
 
 
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
-# LIST PLAYERS
-# ============================================================
+# --------------------------------------------------
+# RECURSIVE FIRESTORE DELETION
+# --------------------------------------------------
 
-@api_view(["GET"])
-def list_players(request):
+def delete_document_tree(document_ref):
 
-    authenticated, response = control_center_authenticated(request)
+    # Delete all nested collections and their documents first.
+    for collection_ref in document_ref.collections():
 
-    if not authenticated:
-        return response
+        for child_document in collection_ref.stream():
 
-    try:
+            delete_document_tree(
+                child_document.reference
+            )
 
-        players = []
-
-        documents = db.collection("playerData").stream()
-
-        for document in documents:
-
-            data = document.to_dict() or {}
-
-            players.append({
-                "playerId": document.id,
-                "playerName": data.get("playerName", "Unknown"),
-                "level": data.get("level", 0),
-                "highScore": data.get("highScore", 0),
-                "legendScore": data.get("legendScore", 0),
-                "gold": data.get("gold", 0),
-                "createdAt": data.get("createdAt"),
-                "lastLogin": data.get("lastLogin"),
-                "updatedAt": data.get("updatedAt")
-            })
-
-        players.sort(
-            key=lambda player: player.get("lastLogin") or 0,
-            reverse=True
-        )
-
-        return Response({
-            "success": True,
-            "count": len(players),
-            "players": players
-        })
-
-    except Exception:
-
-        logger.exception("Failed to retrieve players.")
-
-        return Response(
-            {"error": "Unable to retrieve players."},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+    # Delete the document itself.
+    document_ref.delete()
 
 
-# ============================================================
-# PLAYER DETAIL
-# ============================================================
+# --------------------------------------------------
+# DELETE PLAYER
+# --------------------------------------------------
 
 @api_view(["POST"])
-def get_player_detail(request):
+def delete_player(request):
 
-    authenticated, response = control_center_authenticated(request)
+    authenticated, error_response = control_center_authenticated(request)
 
     if not authenticated:
-        return response
+        return error_response
 
     player_id = request.data.get("player_id")
 
     if not player_id:
         return Response(
-            {"error": "Missing player_id."},
+            {"error": "Player ID is required."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
+    deleted = []
+
     try:
 
-        player_ref = db.collection("playerData").document(
-            str(player_id)
-        )
+        # --------------------------------------------------
+        # 1. DELETE PLAYER DATA AND SUBCOLLECTIONS
+        # --------------------------------------------------
 
-        player_doc = player_ref.get()
+        player_ref = db.collection("playerData").document(player_id)
 
-        if not player_doc.exists:
-            return Response(
-                {"error": "Player not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
+        if player_ref.get().exists:
 
-        player_data = player_doc.to_dict() or {}
+            delete_document_tree(player_ref)
+            deleted.append("playerData")
+
+        # --------------------------------------------------
+        # 2. DELETE FRAUD LOGS
+        # --------------------------------------------------
+
+        fraud_ref = db.collection("fraud_logs").document(player_id)
+
+        if fraud_ref.get().exists:
+
+            fraud_ref.delete()
+            deleted.append("fraud_logs")
+
+        # --------------------------------------------------
+        # 3. DELETE FIREBASE AUTH ACCOUNT
+        # --------------------------------------------------
+
+        try:
+
+            firebase_auth.delete_user(player_id)
+
+            deleted.append("authentication")
+
+        except firebase_auth.UserNotFoundError:
+
+            # Already deleted; this makes retries safe.
+            deleted.append("authentication (already absent)")
 
         return Response({
             "success": True,
-            "playerId": player_doc.id,
-            "player": player_data
+            "message": "Player deleted successfully.",
+            "player_id": player_id,
+            "deleted": deleted
         })
 
     except Exception:
 
         logger.exception(
-            "Failed to retrieve player %s.",
+            "Failed to delete player %s",
             player_id
         )
 
         return Response(
-            {"error": "Unable to retrieve player details."},
+            {
+                "success": False,
+                "error": "Player deletion failed. Check server logs before retrying."
+            },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )

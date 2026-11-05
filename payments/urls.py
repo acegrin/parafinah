@@ -13,6 +13,7 @@ from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
 from .player_admin import list_players
 from .player_admin import list_players, get_player_detail
+from .player_admin import delete_player
 
 urlpatterns = [
     path('purchase_item/', purchase_item, name='purchase_item'),
@@ -47,4 +48,6 @@ urlpatterns = [
 
     path("control_center/players/list/", list_players, name="control_center_list_players"),
     path("control_center/players/detail/", get_player_detail,name="control_center_player_detail"),
+
+    path("control_center/players/delete/", delete_player, name="control_center_delete_player"),
 ]
