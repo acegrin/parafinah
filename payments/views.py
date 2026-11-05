@@ -19,17 +19,19 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import timezone, datetime
 import dateutil.parser  # pip install python-dateutil
 from dateutil.parser import parse
-from payments.models import LeaderboardEntry, LevelConfig, NotificationEntry, RunnerEntry, PackageEntry
+from payments.models import LeaderboardEntry, LevelConfig, NotificationEntry, RunnerEntry, PackageEntry, EventEntry, EventParticipation, Mission
 from .mission_system import get_mission_article, get_mission_manifest
-from .models import (
-    Mission,
-)
 from .news_system import get_news_manifest, get_news_article
 from .notification_system import get_notification_manifest, get_notification_article
 from .objective_system import get_objectives_manifest, get_objectives_article
 from .package_system import get_package_manifest, get_package_article
 from .runner_system import get_runner_manifest, get_runner_article
 from .templates.world_system import get_world_article, get_world_manifest
+
+from collections import defaultdict
+
+from django.db import transaction
+from django.db.models import Q
 
 firestore_client = firestore.client()
 
