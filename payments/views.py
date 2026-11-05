@@ -160,77 +160,61 @@ def sanitize_value(value):
 
     return value
 
+
 def record_event_participation(
     user_id,
     current_legend,
-    applied_legend,
     accepted_legend_events
 ):
     """
-    Records accepted Legend Point awards against every ranking event
-    whose time window contains the award timestamp.
+    Creates participation once per player/event/version.
 
-    EventParticipation is unique per event/player. Its version is
-    refreshed when the event starts a new competition version.
+    Existing participation with the same version is left untouched.
+    A different version resets the participation snapshot.
     """
 
     if not accepted_legend_events:
         return
 
-    # Convert accepted client timestamps (milliseconds) to aware datetimes.
+    # Convert accepted timestamps to aware datetimes.
     for award in accepted_legend_events:
         award["datetime"] = datetime.fromtimestamp(
             award["timestamp_utc"] / 1000,
             tz=timezone.utc
         )
 
-    earliest = min(a["datetime"] for a in accepted_legend_events)
-    latest = max(a["datetime"] for a in accepted_legend_events)
-
-    # Only fetch ranking events that could overlap this batch.
-    ranking_events = list(
-        EventEntry.objects.filter(
-            event_type="RANKED",
-            is_active=True,
-            status="ACTIVE",
-            start_time__lte=latest
-        ).filter(
-            Q(end_time__isnull=True) |
-            Q(end_time__gt=earliest)
-        )
+    earliest = min(
+        award["datetime"] for award in accepted_legend_events
     )
 
-    if not ranking_events:
-        return
+    latest = max(
+        award["datetime"] for award in accepted_legend_events
+    )
 
-    # Aggregate points per event. Each award is checked against its
-    # own timestamp, so points outside an event's time window are ignored.
-    event_totals = defaultdict(int)
+    # Find ranking events that overlap the award time range.
+    ranking_events = EventEntry.objects.filter(
+        event_type="RANKED",
+        is_active=True,
+        status="ACTIVE",
+        start_time__lte=latest
+    ).filter(
+        Q(end_time__isnull=True) |
+        Q(end_time__gt=earliest)
+    )
 
-    for award in accepted_legend_events:
-        award_time = award["datetime"]
+    for event in ranking_events:
 
-        for event in ranking_events:
-            if award_time < event.start_time:
-                continue
-
-            if event.end_time and award_time >= event.end_time:
-                continue
-
-            event_totals[event.event_id] += award["delta"]
-
-    if not event_totals:
-        return
-
-    # Update each player's participation record.
-    for event_id, points in event_totals.items():
-
-        event = next(
-            (e for e in ranking_events if e.event_id == event_id),
-            None
+        # Check whether at least one award belongs to this event.
+        participated = any(
+            award["datetime"] >= event.start_time
+            and (
+                event.end_time is None
+                or award["datetime"] < event.end_time
+            )
+            for award in accepted_legend_events
         )
 
-        if event is None:
+        if not participated:
             continue
 
         with transaction.atomic():
@@ -242,28 +226,28 @@ def record_event_participation(
                     defaults={
                         "version": event.current_version,
                         "starting_legend_points": current_legend,
-                        "ending_legend_points": current_legend + applied_legend,
-                        "event_points": points
+                        "ending_legend_points": 0,
+                        "event_points": 0
                     }
                 )
             )
 
-            if not created:
+            if created:
+                logger.info(
+                    "Created event participation: user=%s event=%s version=%s",
+                    user_id,
+                    event.event_id,
+                    event.current_version
+                )
+                continue
 
-                # A new event version means a completely new competition.
-                if participation.version != event.current_version:
-                    participation.version = event.current_version
-                    participation.starting_legend_points = current_legend
-                    participation.ending_legend_points = (
-                        current_legend + applied_legend
-                    )
-                    participation.event_points = points
+            # A new competition version requires a fresh snapshot.
+            if participation.version != event.current_version:
 
-                else:
-                    participation.event_points += points
-                    participation.ending_legend_points = (
-                        current_legend + applied_legend
-                    )
+                participation.version = event.current_version
+                participation.starting_legend_points = current_legend
+                participation.ending_legend_points = 0
+                participation.event_points = 0
 
                 participation.save(
                     update_fields=[
@@ -274,6 +258,16 @@ def record_event_participation(
                         "updated_at"
                     ]
                 )
+
+                logger.info(
+                    "Reset event participation: user=%s event=%s version=%s",
+                    user_id,
+                    event.event_id,
+                    event.current_version
+                )
+
+            # Same version: already participating. No database write.
+
 
 
 @api_view(["POST"])
@@ -670,12 +664,10 @@ def economy_sync(request):
             record_event_participation(
                 user_id=user_id,
                 current_legend=current_legend,
-                applied_legend=applied_legend,
                 accepted_legend_events=accepted_legend_events
             )
 
         except Exception:
-            # Do not silently lose the failure.
             logger.exception(
                 "Failed to record event participation for user %s",
                 user_id
