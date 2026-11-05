@@ -7,7 +7,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
-from .firebase_client import db
+from .firebase_client import db, firebase_auth
 from .event_admin import control_center_authenticated
 
 
