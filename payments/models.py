@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.files import File
 from urllib.parse import urlparse
 import hashlib
+from django.utils import timezone
 
 from core.storage.github import GitHubStorage
 
@@ -336,6 +337,7 @@ class EventEntry(models.Model):
     def to_dict(self):
         return {
             "id": str(self.event_id),
+            "current_version": self.current_version,
             "payload_structure": self.payload_structure,
             "title": self.title,
             "description": self.description,  # ✅ fixed
@@ -351,6 +353,42 @@ class EventEntry(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+
+class EventActivation(models.Model):
+
+    event = models.ForeignKey(
+        EventEntry,
+        on_delete=models.CASCADE,
+        related_name="activations"
+    )
+
+    automation_run_id = models.CharField(
+        max_length=64,
+        unique=True
+    )
+
+    version = models.PositiveIntegerField()
+
+    activated_at = models.DateTimeField(
+        default=timezone.now
+    )
+
+    scheduled_for = models.DateTimeField()
+
+    class Meta:
+        ordering = ["version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "version"],
+                name="unique_event_activation_version"
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.event.title} "
+            f"- Version {self.version}"
+        )
 
 class Mission(models.Model):
     # ---- Identity ----
