@@ -576,7 +576,7 @@ class PackageEntryAdmin(admin.ModelAdmin):
     list_display = ("title", "updated_at")
     list_filter = ("created_at", "updated_at")
 
-@admin.register(PackageEntry)
+@admin.register(EventParticipation)
 class EventParticipationAdmin(admin.ModelAdmin):
     list_display = ("event", "player_id")
     list_filter = ("joined_at", "updated_at")
