@@ -164,8 +164,6 @@ class OverwriteStorage(GitHubStorage):
         kwargs = {}  # include custom kwargs if you have any
         return (name, args, kwargs)
 
-
-
 def default_level_config():
     return LevelConfig.objects.order_by("level").values_list("id", flat=True).first()
 
@@ -261,6 +259,18 @@ class EventEntry(models.Model):
         blank=True
     )
     title = models.CharField(max_length=128)
+
+    EVENT_TYPE_CHOICES = [
+        ("STANDARD", "Standard Event"),
+        ("RANKED", "Ranking Competition"),
+    ]
+
+    event_type = models.CharField(
+        max_length=16,
+        choices=EVENT_TYPE_CHOICES,
+        default="STANDARD"
+    )
+
     description = models.CharField(max_length=128)
 
     headline = models.CharField(max_length=128)
@@ -293,6 +303,8 @@ class EventEntry(models.Model):
         null=True,
         blank=True
     )
+
+    current_version = models.PositiveIntegerField(default=0)
 
     # ---- State ----
     STATUS_CHOICES = [
@@ -796,3 +808,36 @@ class PackageEntry(models.Model):
 
     class Meta:
         ordering = ["price", "title"]
+
+class EventParticipation(models.Model):
+    event = models.ForeignKey(
+        EventEntry,
+        on_delete=models.CASCADE,
+        related_name="participations"
+    )
+
+    version = models.PositiveIntegerField(default=0)
+
+    player_id = models.CharField(max_length=64)
+
+    starting_legend_points = models.BigIntegerField(default=0)
+    ending_legend_points = models.BigIntegerField(default=0)
+    event_points = models.BigIntegerField(default=0)
+
+    joined_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["event", "player_id"],
+                name="unique_event_participation"
+            )
+        ]
+
+        indexes = [
+            models.Index(
+                fields=["event", "version", "event_points"],
+                name="event_participation_rank_idx"
+            )
+        ]

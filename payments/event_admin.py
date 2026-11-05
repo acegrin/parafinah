@@ -1,4 +1,4 @@
-#event_adnub.py
+#event_admin.py
 
 import hashlib
 import hmac

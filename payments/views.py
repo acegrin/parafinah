@@ -158,14 +158,131 @@ def sanitize_value(value):
 
     return value
 
+def record_event_participation(
+    user_id,
+    current_legend,
+    applied_legend,
+    accepted_legend_events
+):
+    """
+    Records accepted Legend Point awards against every ranking event
+    whose time window contains the award timestamp.
+
+    EventParticipation is unique per event/player. Its version is
+    refreshed when the event starts a new competition version.
+    """
+
+    if not accepted_legend_events:
+        return
+
+    # Convert accepted client timestamps (milliseconds) to aware datetimes.
+    for award in accepted_legend_events:
+        award["datetime"] = datetime.fromtimestamp(
+            award["timestamp_utc"] / 1000,
+            tz=timezone.utc
+        )
+
+    earliest = min(a["datetime"] for a in accepted_legend_events)
+    latest = max(a["datetime"] for a in accepted_legend_events)
+
+    # Only fetch ranking events that could overlap this batch.
+    ranking_events = list(
+        EventEntry.objects.filter(
+            event_type="RANKED",
+            is_active=True,
+            status="ACTIVE",
+            start_time__lte=latest
+        ).filter(
+            Q(end_time__isnull=True) |
+            Q(end_time__gt=earliest)
+        )
+    )
+
+    if not ranking_events:
+        return
+
+    # Aggregate points per event. Each award is checked against its
+    # own timestamp, so points outside an event's time window are ignored.
+    event_totals = defaultdict(int)
+
+    for award in accepted_legend_events:
+        award_time = award["datetime"]
+
+        for event in ranking_events:
+            if award_time < event.start_time:
+                continue
+
+            if event.end_time and award_time >= event.end_time:
+                continue
+
+            event_totals[event.event_id] += award["delta"]
+
+    if not event_totals:
+        return
+
+    # Update each player's participation record.
+    for event_id, points in event_totals.items():
+
+        event = next(
+            (e for e in ranking_events if e.event_id == event_id),
+            None
+        )
+
+        if event is None:
+            continue
+
+        with transaction.atomic():
+
+            participation, created = (
+                EventParticipation.objects.select_for_update().get_or_create(
+                    event=event,
+                    player_id=user_id,
+                    defaults={
+                        "version": event.current_version,
+                        "starting_legend_points": current_legend,
+                        "ending_legend_points": current_legend + applied_legend,
+                        "event_points": points
+                    }
+                )
+            )
+
+            if not created:
+
+                # A new event version means a completely new competition.
+                if participation.version != event.current_version:
+                    participation.version = event.current_version
+                    participation.starting_legend_points = current_legend
+                    participation.ending_legend_points = (
+                        current_legend + applied_legend
+                    )
+                    participation.event_points = points
+
+                else:
+                    participation.event_points += points
+                    participation.ending_legend_points = (
+                        current_legend + applied_legend
+                    )
+
+                participation.save(
+                    update_fields=[
+                        "version",
+                        "starting_legend_points",
+                        "ending_legend_points",
+                        "event_points",
+                        "updated_at"
+                    ]
+                )
+
+
 @api_view(["POST"])
 def economy_sync(request):
+
     user_id = request.data.get("userId")
     events = request.data.get("events")
     client_version = request.data.get("clientVersion")
     device_id = request.data.get("deviceId")
 
-    if not user_id or not events:
+    if not user_id or not isinstance(events, list) or not events:
         return Response(
             {"error": "Missing userId or events"},
             status=status.HTTP_400_BAD_REQUEST
@@ -175,38 +292,69 @@ def economy_sync(request):
     fraud_ref = db.collection("fraud_logs").document(user_id)
 
     user_doc = user_ref.get()
+
     if not user_doc.exists:
-        return Response({"error": "User not found"}, status=404)
+        return Response(
+            {"error": "User not found"},
+            status=status.HTTP_404_NOT_FOUND
+        )
 
     user_data = user_doc.to_dict()
 
-    # ---- Cached user state ----
+    # --------------------------------------------------
+    # USER STATE
+    # --------------------------------------------------
+
     current_gold = user_data.get("gold", 0)
     current_legend = user_data.get("legendScore", 0)
+
     registered_device_id = user_data.get("deviceId")
     player_name = user_data.get("playerName", "Unknown")
 
     missions = user_data.get("missions", [])
     rewards = user_data.get("rewards", [])
 
-    # ---- Fast lookup maps ----
-    mission_map = {m["missionId"]: m for m in missions}
+    mission_map = {
+        m["missionId"]: m
+        for m in missions
+    }
+
+    # --------------------------------------------------
+    # PROCESSING STATE
+    # --------------------------------------------------
 
     applied_gold = 0
     applied_legend = 0
     applied_cards = 0
+
     missions_dirty = False
     rewards_dirty = False
 
     suspicious_events = []
+    accepted_legend_events = []
 
     batch = db.batch()
-    now_ts = int(datetime.now(timezone.utc).timestamp())
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    now = datetime.now(timezone.utc)
+    now_ts = int(now.timestamp())
+    now_ms = int(now.timestamp() * 1000)
 
     MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
 
-    def log_fraud(evt, category, reason, details=None, severity="medium"):
+    # Prevent duplicate event IDs within this same request.
+    seen_event_ids = set()
+
+    # --------------------------------------------------
+    # FRAUD LOGGING
+    # --------------------------------------------------
+
+    def log_fraud(
+        evt,
+        category,
+        reason,
+        details=None,
+        severity="medium"
+    ):
         suspicious_events.append({
             "eventId": evt.get("eventId"),
             "category": category,
@@ -218,71 +366,184 @@ def economy_sync(request):
             "detectedAtUtc": now_ts
         })
 
+    # --------------------------------------------------
+    # PROCESS ECONOMY EVENTS
+    # --------------------------------------------------
+
     for evt in events:
+
+        if not isinstance(evt, dict):
+            continue
+
         event_id = evt.get("eventId")
+
         if not event_id:
             continue
+
+        # Duplicate inside the incoming request.
+        if event_id in seen_event_ids:
+            log_fraud(
+                evt,
+                "duplicate_event",
+                "Duplicate event ID in request",
+                severity="low"
+            )
+            continue
+
+        seen_event_ids.add(event_id)
 
         delta = evt.get("delta", 0)
         collected_type = evt.get("collectedType")
         timestamp_utc = evt.get("timestampUtc")
+
         context = evt.get("context") or ""
         source_id = evt.get("sourceId") or ""
 
-        event_ref = user_ref.collection("economy_events").document(event_id)
+        event_ref = user_ref.collection(
+            "economy_events"
+        ).document(event_id)
 
-        # ---- Duplicate detection ----
+        # --------------------------------------------------
+        # EXISTING EVENT CHECK
+        # --------------------------------------------------
+
         if event_ref.get().exists:
-            log_fraud(evt, "duplicate_event", "Event replay", severity="low")
+            log_fraud(
+                evt,
+                "duplicate_event",
+                "Event replay",
+                severity="low"
+            )
             continue
 
-        # ---- Validation ----
-        if delta <= 0:
-            log_fraud(evt, "invalid_delta", "Non-positive delta", {"delta": delta}, "high")
+        # --------------------------------------------------
+        # VALIDATION
+        # --------------------------------------------------
+
+        if (
+            not isinstance(delta, (int, float))
+            or isinstance(delta, bool)
+            or delta <= 0
+        ):
+            log_fraud(
+                evt,
+                "invalid_delta",
+                "Invalid or non-positive delta",
+                {"delta": delta},
+                "high"
+            )
             continue
 
-        if not timestamp_utc or abs(now_ms - timestamp_utc) > MAX_TIME_DRIFT_MS:
-            log_fraud(evt, "invalid_timestamp", "Timestamp drift", severity="medium")
+        if (
+            not isinstance(timestamp_utc, (int, float))
+            or isinstance(timestamp_utc, bool)
+            or abs(now_ms - timestamp_utc) > MAX_TIME_DRIFT_MS
+        ):
+            log_fraud(
+                evt,
+                "invalid_timestamp",
+                "Timestamp drift",
+                severity="medium"
+            )
             continue
 
-        if registered_device_id and device_id != registered_device_id:
-            log_fraud(evt, "device_mismatch", "Device mismatch", severity="high")
+        if (
+            registered_device_id
+            and device_id != registered_device_id
+        ):
+            log_fraud(
+                evt,
+                "device_mismatch",
+                "Device mismatch",
+                severity="high"
+            )
             continue
 
-        # ---- Economy handling ----
+        # --------------------------------------------------
+        # GOLD
+        # --------------------------------------------------
+
         if collected_type == "gold":
-            level_info = LevelConfig.objects.get(level=context)
+
+            try:
+                level_info = LevelConfig.objects.get(level=context)
+            except LevelConfig.DoesNotExist:
+                log_fraud(
+                    evt,
+                    "invalid_level",
+                    "Level configuration not found",
+                    {"level": context},
+                    "high"
+                )
+                continue
+
             applied_gold += level_info.value
 
+        # --------------------------------------------------
+        # LEGEND POINTS
+        # --------------------------------------------------
+
         elif collected_type == "legend":
+
             applied_legend += delta
 
+            # Only validated, accepted Legend events reach here.
+            accepted_legend_events.append({
+                "delta": delta,
+                "timestamp_utc": timestamp_utc
+            })
+
+        # --------------------------------------------------
+        # CARDS / MISSIONS
+        # --------------------------------------------------
+
         elif collected_type == "card":
-            mission_id = evt.get("sourceId")
+
+            mission_id = source_id
             card_level = delta
             collected_at = timestamp_utc
-            applied_cards += 1
-            missions_dirty = True
 
             is_story = context.startswith("Story")
 
             if is_story:
-                required_total = int(context.split("-")[1])
+
+                try:
+                    required_total = int(context.split("-")[1])
+                except (IndexError, ValueError):
+                    log_fraud(
+                        evt,
+                        "invalid_story_context",
+                        "Invalid story context",
+                        {"context": context},
+                        "high"
+                    )
+                    continue
+
             else:
+
                 try:
                     mission_def = Mission.objects.get(
                         mission_id=mission_id,
                         is_active=True
                     )
                 except Mission.DoesNotExist:
-                    log_fraud(evt, "invalid_mission", "Mission not found", severity="high")
+                    log_fraud(
+                        evt,
+                        "invalid_mission",
+                        "Mission not found",
+                        severity="high"
+                    )
                     continue
 
                 required_total = mission_def.target_value
 
+            applied_cards += 1
+            missions_dirty = True
+
             mission = mission_map.get(mission_id)
 
             if not mission:
+
                 mission = {
                     "missionId": mission_id,
                     "targetValue": required_total,
@@ -290,54 +551,80 @@ def economy_sync(request):
                     "completed": False,
                     "createdAt": now_ts
                 }
+
                 missions.append(mission)
                 mission_map[mission_id] = mission
 
-            if mission.get("completed"):
-                pass
-            else:
-                cards = mission.setdefault("collectedCards", [])
+            if not mission.get("completed"):
+
+                cards = mission.setdefault(
+                    "collectedCards",
+                    []
+                )
+
                 cards.append({
                     "level": f"Level{card_level}",
                     "collectedAt": collected_at
                 })
 
                 if len(cards) >= mission["targetValue"]:
+
                     mission["completed"] = True
                     mission["completedAt"] = now_ts
+
                     rewards.append({
                         "id": mission_id,
                         "claimed": False,
                         "createdAt": now_ts
                     })
+
                     rewards_dirty = True
+
             NotificationEntry.create_from_image_url(
                 user_id=user_id,
                 title="Card Collected",
                 description=f"Card collected for {mission_id}",
-                image_url="https://parafinah.pythonanywhere.com/media/unordered/NotificationIconBlackNWhite.png"
+                image_url=(
+                    "https://parafinah.pythonanywhere.com/"
+                    "media/unordered/NotificationIconBlackNWhite.png"
+                )
             )
 
         else:
-            log_fraud(evt, "unknown_type", "Unknown collectedType", severity="medium")
+
+            log_fraud(
+                evt,
+                "unknown_type",
+                "Unknown collectedType",
+                {"collectedType": collected_type},
+                "medium"
+            )
             continue
 
-        # ---- Persist event ----
+        # --------------------------------------------------
+        # QUEUE ACCEPTED EVENT FOR FIRESTORE
+        # --------------------------------------------------
+
         batch.set(event_ref, {
             "runId": evt.get("runId"),
             "type": evt.get("type"),
             "collectedType": collected_type,
             "delta": delta,
             "timestampUtc": timestamp_utc,
-            "sourceId": evt.get("sourceId"),
+            "sourceId": source_id,
             "context": context,
             "clientVersion": client_version,
             "deviceId": device_id,
             "serverTimestamp": now_ts
         })
 
-    # ---- Final user update ----
-    updates = {"updatedAt": now_ts}
+    # --------------------------------------------------
+    # UPDATE PLAYER DATA
+    # --------------------------------------------------
+
+    updates = {
+        "updatedAt": now_ts
+    }
 
     if applied_gold:
         updates["gold"] = current_gold + applied_gold
@@ -354,26 +641,68 @@ def economy_sync(request):
     if len(updates) > 1:
         batch.update(user_ref, updates)
 
+    # --------------------------------------------------
+    # COMMIT FIRESTORE
+    # --------------------------------------------------
+
     batch.commit()
 
-    # ---- Fraud logging ----
+    # --------------------------------------------------
+    # FRAUD LOGGING
+    # --------------------------------------------------
+
     if suspicious_events:
+
         fraud_ref.set({
             "lastUpdatedUtc": now_ts,
             "events": firestore.ArrayUnion(suspicious_events)
         }, merge=True)
 
-    # ---- Leaderboard ----
+    # --------------------------------------------------
+    # EVENT PARTICIPATION
+    # --------------------------------------------------
+
+    if accepted_legend_events:
+
+        try:
+            record_event_participation(
+                user_id=user_id,
+                current_legend=current_legend,
+                applied_legend=applied_legend,
+                accepted_legend_events=accepted_legend_events
+            )
+
+        except Exception:
+            # Do not silently lose the failure.
+            logger.exception(
+                "Failed to record event participation for user %s",
+                user_id
+            )
+
+    # --------------------------------------------------
+    # GLOBAL LEADERBOARD
+    # --------------------------------------------------
+
     if applied_legend:
+
         try:
             from leaderboards.services import update_leaderboards
+
             update_leaderboards(
                 user_id=user_id,
                 player_name=player_name,
                 points_earned=applied_legend
             )
+
         except Exception:
-            pass
+            logger.exception(
+                "Failed to update global leaderboard for user %s",
+                user_id
+            )
+
+    # --------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------
 
     return Response({
         "message": "Economy events processed",
