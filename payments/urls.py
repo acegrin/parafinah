@@ -11,7 +11,6 @@ from .notification_system import delete_notification
 from .event_admin import create_event, update_event, delete_event
 from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
-from .player_admin import list_players
 from .player_admin import list_players, get_player_detail
 from .player_admin import delete_player
 
