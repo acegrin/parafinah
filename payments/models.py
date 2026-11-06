@@ -285,7 +285,7 @@ class EventEntry(models.Model):
     ]
 
     requirement_type = models.CharField(
-        max_length=16,
+        max_length=50,
         choices=REQUIREMENT_TYPE_CHOICES,
         default="LEGEND"
     )
