@@ -161,7 +161,7 @@ def sanitize_value(value):
     return value
 
 
-def get_eligible_events(events, now_ms):
+def get_eligible_events(events, now_ms, collected_type):
     """
     Finds ranked events that are currently active and overlap
     the timestamps in this economy batch.
@@ -213,7 +213,7 @@ def get_eligible_events(events, now_ms):
 
     return list(
         EventEntry.objects.filter(
-            event_type="RANKED",
+            collected_type=collected_type.upper(),
             is_active=True,
             status="ACTIVE",
             start_time__lte=start_bound
@@ -229,7 +229,7 @@ def get_eligible_events(events, now_ms):
     )
 
 
-def get_event_ids_for_timestamp(timestamp_utc, eligible_events):
+def get_event_ids_for_timestamp(timestamp_utc, collected_type):
     """
     Returns event ID/version keys applicable to one
     economy transaction.
@@ -242,6 +242,16 @@ def get_event_ids_for_timestamp(timestamp_utc, eligible_events):
         tz=timezone.utc
     )
 
+    # --------------------------------------------------
+    # EVENT ELIGIBILITY
+    # --------------------------------------------------
+
+    # Query eligible events once for the entire batch.
+    eligible_events = get_eligible_events(
+        events,
+        now_ms,
+        collected_type
+    )
     event_ids = []
 
     for event in eligible_events:
@@ -269,7 +279,6 @@ def economy_sync(request):
     events = request.data.get("events")
     client_version = request.data.get("clientVersion")
     device_id = request.data.get("deviceId")
-    economy_sync_type = request.data.get("collectedType")
 
     if not user_id or not isinstance(events, list) or not events:
         return Response(
@@ -328,16 +337,6 @@ def economy_sync(request):
     now_ms = int(now.timestamp() * 1000)
 
     MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
-
-    # --------------------------------------------------
-    # EVENT ELIGIBILITY
-    # --------------------------------------------------
-
-    # Query eligible events once for the entire batch.
-    eligible_events = get_eligible_events(
-        events,
-        now_ms
-    )
 
     # --------------------------------------------------
     # DUPLICATE PROTECTION
@@ -609,7 +608,7 @@ def economy_sync(request):
 
         eligible_event_ids = get_event_ids_for_timestamp(
             timestamp_utc,
-            eligible_events
+            collected_type
         )
 
         # --------------------------------------------------
