@@ -376,7 +376,10 @@ class EventActivation(models.Model):
     scheduled_for = models.DateTimeField()
 
     # Planned end of this particular activation.
-    ends_at = models.DateTimeField()
+    ends_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
 
     # Actual scheduled deactivation time.
     ended_at = models.DateTimeField(

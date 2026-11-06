@@ -776,6 +776,10 @@ def deactivate_automated_event(request):
 
         with transaction.atomic():
 
+            # ------------------------------------------
+            # LOCK EVENT
+            # ------------------------------------------
+
             try:
                 event = EventEntry.objects.select_for_update().get(
                     event_id=event_id
@@ -813,7 +817,9 @@ def deactivate_automated_event(request):
                         "success": True,
                         "already_processed": True,
                         "version": existing.version,
-                        "message": "Deactivation was already processed."
+                        "message": (
+                            "Deactivation was already processed."
+                        )
                     },
                     status=status.HTTP_200_OK
                 )
@@ -831,6 +837,25 @@ def deactivate_automated_event(request):
                 )
                 .first()
             )
+
+            # Backward compatibility:
+            # Older activation records may not have ends_at.
+            if activation is None:
+
+                activation = (
+                    EventActivation.objects
+                    .select_for_update()
+                    .filter(
+                        event=event,
+                        version=event.current_version,
+                        ends_at__isnull=True,
+                        ended_at__isnull=True
+                    )
+                    .first()
+                )
+
+                if activation:
+                    activation.ends_at = scheduled_for
 
             if activation is None:
                 return Response(
@@ -863,6 +888,7 @@ def deactivate_automated_event(request):
 
             activation.save(
                 update_fields=[
+                    "ends_at",
                     "ended_at",
                     "deactivation_run_id"
                 ]
@@ -872,7 +898,7 @@ def deactivate_automated_event(request):
             # UPDATE CURRENT EVENT
             # ------------------------------------------
 
-            # Do not let an older activation change the
+            # An older activation must never change the
             # visible state of a newer activation.
             if event.current_version == activation.version:
 
@@ -886,12 +912,18 @@ def deactivate_automated_event(request):
 
                 bump_event_manifest()
 
+        # ------------------------------------------
+        # SUCCESS
+        # ------------------------------------------
+
         return Response(
             {
                 "success": True,
                 "version": activation.version,
                 "event_id": str(event.event_id),
-                "message": "Event deactivated and ready for resolution."
+                "message": (
+                    "Event deactivated and ready for resolution."
+                )
             },
             status=status.HTTP_200_OK
         )
