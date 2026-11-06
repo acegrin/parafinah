@@ -13,6 +13,7 @@ from .event_admin import control_center_authenticated
 
 logger = logging.getLogger(__name__)
 
+
 @api_view(["GET"])
 def get_event_economy_data(request):
 
@@ -22,21 +23,28 @@ def get_event_economy_data(request):
         return response
 
     event_id = request.query_params.get("event_id")
+    version = request.query_params.get("version")
 
-    if not event_id:
+    if not event_id or not version:
         return Response(
-            {"error": "Missing event_id."},
+            {"error": "Missing event_id or version."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
     try:
+        version = int(version)
+
+        if version < 1:
+            raise ValueError("Invalid event version.")
+
+        event_token = f"{event_id}:{version}"
 
         documents = (
             db.collection_group("economy_events")
             .where(
                 "eventIds",
                 "array_contains",
-                event_id
+                event_token
             )
             .stream()
         )
@@ -48,17 +56,27 @@ def get_event_economy_data(request):
             economy_event = document.to_dict() or {}
 
             economy_event["economyEventId"] = document.id
-
-            economy_event["userId"] = document.reference.parent.parent.id
+            economy_event["userId"] = (
+                document.reference.parent.parent.id
+            )
 
             economy_events.append(economy_event)
 
         return Response({
             "success": True,
             "eventId": event_id,
+            "version": version,
+            "eventToken": event_token,
             "count": len(economy_events),
             "economyEvents": economy_events
         })
+
+    except ValueError as error:
+
+        return Response(
+            {"error": str(error)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
     except Exception:
 
@@ -70,6 +88,7 @@ def get_event_economy_data(request):
             {"error": "Unable to retrieve event economy data."},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
 
 # ============================================================
 # LIST PLAYERS

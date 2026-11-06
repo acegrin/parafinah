@@ -401,6 +401,11 @@ class EventActivation(models.Model):
         blank=True
     )
 
+    results_submitted_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
     class Meta:
         ordering = ["version"]
         constraints = [
@@ -414,6 +419,47 @@ class EventActivation(models.Model):
         return (
             f"{self.event.title} "
             f"- Version {self.version}"
+        )
+
+class EventResolutionParticipant(models.Model):
+
+    activation = models.ForeignKey(
+        EventActivation,
+        on_delete=models.CASCADE,
+        related_name="resolution_participants"
+    )
+
+    user_id = models.CharField(max_length=128)
+
+    score = models.BigIntegerField(default=0)
+
+    position = models.PositiveIntegerField()
+
+    gold_reward = models.PositiveIntegerField(default=0)
+
+    reward_issued = models.BooleanField(default=False)
+
+    notification_sent = models.BooleanField(default=False)
+
+    processed_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    class Meta:
+        ordering = ["position", "user_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activation", "user_id"],
+                name="unique_event_resolution_participant"
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.activation.event.title} "
+            f"- V{self.activation.version} "
+            f"- {self.user_id}"
         )
 
 class Mission(models.Model):
