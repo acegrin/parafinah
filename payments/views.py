@@ -169,12 +169,16 @@ def get_eligible_events(events, now_ms, collected_type):
     An event must:
     - Be enabled.
     - Have ACTIVE status.
+    - Match the collected type (stored in EventEntry.requirement_type).
     - Have already started.
     - Not have ended yet.
     - Overlap the incoming transaction timestamp range.
     """
 
     MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
+
+    if not collected_type or not isinstance(collected_type, str):
+        return []
 
     timestamps = [
         evt.get("timestampUtc")
@@ -213,7 +217,9 @@ def get_eligible_events(events, now_ms, collected_type):
 
     return list(
         EventEntry.objects.filter(
-            collected_type=collected_type.upper(),
+            # EventEntry has no `collected_type` field; the matching
+            # field is `requirement_type`. iexact makes "gold" match "GOLD".
+            requirement_type__iexact=collected_type,
             is_active=True,
             status="ACTIVE",
             start_time__lte=start_bound
@@ -229,10 +235,13 @@ def get_eligible_events(events, now_ms, collected_type):
     )
 
 
-def get_event_ids_for_timestamp(events, timestamp_utc, collected_type, now_ms):
+def get_event_ids_for_timestamp(eligible_events, timestamp_utc):
     """
     Returns event ID/version keys applicable to one
     economy transaction.
+
+    `eligible_events` is the pre-fetched list from get_eligible_events()
+    (queried once per collected type per request, not once per transaction).
 
     Event end times are exclusive.
     """
@@ -242,16 +251,6 @@ def get_event_ids_for_timestamp(events, timestamp_utc, collected_type, now_ms):
         tz=timezone.utc
     )
 
-    # --------------------------------------------------
-    # EVENT ELIGIBILITY
-    # --------------------------------------------------
-
-    # Query eligible events once for the entire batch.
-    eligible_events = get_eligible_events(
-        events,
-        now_ms,
-        collected_type
-    )
     event_ids = []
 
     for event in eligible_events:
@@ -343,6 +342,22 @@ def economy_sync(request):
     # --------------------------------------------------
 
     seen_event_ids = set()
+
+    # --------------------------------------------------
+    # ELIGIBLE EVENT CACHE (one DB query per collected type)
+    # --------------------------------------------------
+
+    eligible_events_cache = {}
+
+    def get_cached_eligible_events(collected_type):
+        key = str(collected_type).lower()
+        if key not in eligible_events_cache:
+            eligible_events_cache[key] = get_eligible_events(
+                events,
+                now_ms,
+                collected_type
+            )
+        return eligible_events_cache[key]
 
     # --------------------------------------------------
     # FRAUD LOGGING
@@ -607,10 +622,8 @@ def economy_sync(request):
         # --------------------------------------------------
 
         eligible_event_ids = get_event_ids_for_timestamp(
-            events,
-            timestamp_utc,
-            collected_type,
-            now_ms
+            get_cached_eligible_events(collected_type),
+            timestamp_utc
         )
 
         # --------------------------------------------------
