@@ -375,6 +375,29 @@ class EventActivation(models.Model):
 
     scheduled_for = models.DateTimeField()
 
+    # Planned end of this particular activation.
+    ends_at = models.DateTimeField()
+
+    # Actual scheduled deactivation time.
+    ended_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    # Identifies the deactivation automation run.
+    deactivation_run_id = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True
+    )
+
+    # Set only after the resolver finishes.
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
     class Meta:
         ordering = ["version"]
         constraints = [
