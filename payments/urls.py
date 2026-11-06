@@ -8,10 +8,10 @@ from .views import mark_notification_read, purchase_item, get_server_date, colle
     get_data_row, get_data_manifest
 from .validation import validation_data_listener, fetch_data, invalidate_runners
 from .notification_system import delete_notification
-from .event_admin import create_event, update_event, delete_event, activate_automated_event
+from .event_admin import create_event, update_event, delete_event, activate_automated_event, get_player_data
 from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
-from .player_admin import list_players, get_player_detail
+from .player_admin import list_players, get_player_detail, get_event_economy_data
 from .player_admin import delete_player
 
 urlpatterns = [
@@ -44,6 +44,8 @@ urlpatterns = [
 	path("control_center/runners/create/", create_runner, name="control_center_create_runner"),
 	path("control_center/runners/update/", update_runner, name="control_center_update_runner"),
 	path("control_center/runners/delete/", delete_runner, name="control_center_delete_runner"),
+
+    path("control_center/events/economy_data/", get_event_economy_data, name="control_center_event_economy_data"),
 
     path("control_center/players/list/", list_players, name="control_center_list_players"),
     path("control_center/players/detail/", get_player_detail,name="control_center_player_detail"),

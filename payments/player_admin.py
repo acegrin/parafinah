@@ -13,6 +13,63 @@ from .event_admin import control_center_authenticated
 
 logger = logging.getLogger(__name__)
 
+@api_view(["GET"])
+def get_event_economy_data(request):
+
+    authenticated, response = control_center_authenticated(request)
+
+    if not authenticated:
+        return response
+
+    event_id = request.query_params.get("event_id")
+
+    if not event_id:
+        return Response(
+            {"error": "Missing event_id."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+
+        documents = (
+            db.collection_group("economy_events")
+            .where(
+                "eventIds",
+                "array_contains",
+                event_id
+            )
+            .stream()
+        )
+
+        economy_events = []
+
+        for document in documents:
+
+            economy_event = document.to_dict() or {}
+
+            economy_event["economyEventId"] = document.id
+
+            economy_event["userId"] = document.reference.parent.parent.id
+
+            economy_events.append(economy_event)
+
+        return Response({
+            "success": True,
+            "eventId": event_id,
+            "count": len(economy_events),
+            "economyEvents": economy_events
+        })
+
+    except Exception:
+
+        logger.exception(
+            "Failed to retrieve event economy data."
+        )
+
+        return Response(
+            {"error": "Unable to retrieve event economy data."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 # ============================================================
 # LIST PLAYERS
