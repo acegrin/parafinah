@@ -272,6 +272,24 @@ class EventEntry(models.Model):
         default="STANDARD"
     )
 
+    REQUIREMENT_TYPE_CHOICES = [
+        ("LEGEND", "Legend Points"),
+        ("GOLD_COLLECT", "Gold Collection"),
+        ("GOLD_SPEND", "Gold Spending"),
+        ("MAIN_CONVOY_VEHICLE_DESTROY", "Main Convoy Vehicle Destroy"),
+        ("ANY_VEHICLE_DESTROY", "Any Vehicle Destroy"),
+        ("ENEMY_CHARACTER_DESTROY", "Enemy Character Destroy"),
+        ("HEALTH_PICKUP", "Health Pickup"),
+        ("AMMO_PICKUP", "Ammo Pickup"),
+        ("ARMOR_PICKUP", "Armor Pickup"),
+    ]
+
+    requirement_type = models.CharField(
+        max_length=16,
+        choices=REQUIREMENT_TYPE_CHOICES,
+        default="LEGEND"
+    )
+
     description = models.CharField(max_length=128)
 
     headline = models.CharField(max_length=128)

@@ -269,6 +269,7 @@ def economy_sync(request):
     events = request.data.get("events")
     client_version = request.data.get("clientVersion")
     device_id = request.data.get("deviceId")
+    economy_sync_type = request.data.get("collectedType")
 
     if not user_id or not isinstance(events, list) or not events:
         return Response(
