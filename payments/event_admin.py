@@ -355,137 +355,172 @@ def event_error_response(error):
 
 @api_view(["POST"])
 def activate_automated_event(request):
-	authenticated, response = control_center_authenticated(request)
 
-	if not authenticated:
-		return response
+    authenticated, response = control_center_authenticated(request)
 
-	event_id = request.data.get("event_id")
-	run_id = request.data.get("automation_run_id")
+    if not authenticated:
+        return response
 
-	if not event_id or not run_id:
-		return Response(
-			{
-				"error": "Missing event_id or automation_run_id."
-			},
-			status=status.HTTP_400_BAD_REQUEST
-		)
+    event_id = request.data.get("event_id")
+    run_id = request.data.get("automation_run_id")
 
-	try:
-		scheduled_for = parse_event_datetime(
-			request.data.get("start_time")
-		)
+    if not event_id or not run_id:
+        return Response(
+            {"error": "Missing event_id or automation_run_id."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
 
-		end_time = parse_event_datetime(
-			request.data.get("end_time")
-		)
+    try:
+        scheduled_for = parse_event_datetime(
+            request.data.get("start_time")
+        )
 
-		if scheduled_for is None or end_time is None:
-			raise ValueError(
-				"Start time and end time are required."
-			)
+        end_time = parse_event_datetime(
+            request.data.get("end_time")
+        )
 
-		if end_time <= scheduled_for:
-			raise ValueError(
-				"Event end time must be after start time."
-			)
+        if scheduled_for is None or end_time is None:
+            raise ValueError(
+                "Start time and end time are required."
+            )
 
-		with transaction.atomic():
-			try:
-				event = EventEntry.objects.select_for_update().get(
-					event_id=event_id
-				)
+        if end_time <= scheduled_for:
+            raise ValueError(
+                "Event end time must be after its start time."
+            )
 
-			except EventEntry.DoesNotExist:
-				return Response(
-					{"error": "Event not found."},
-					status=status.HTTP_404_NOT_FOUND
-				)
+        with transaction.atomic():
 
-			# ------------------------------------------
-			# IDEMPOTENCY CHECK
-			# ------------------------------------------
+            try:
+                event = EventEntry.objects.select_for_update().get(
+                    event_id=event_id
+                )
 
-			existing = EventActivation.objects.filter(
-				automation_run_id=str(run_id)
-			).first()
+            except EventEntry.DoesNotExist:
+                return Response(
+                    {"error": "Event not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
-			if existing:
-				if existing.event_id != event.event_id:
-					return Response(
-						{
-							"error": (
-								"This automation run ID belongs "
-								"to another event."
-							)
-						},
-						status=status.HTTP_409_CONFLICT
-					)
+            # ------------------------------------------
+            # IDEMPOTENCY
+            # ------------------------------------------
 
-				return Response(
-					{
-						"success": True,
-						"already_processed": True,
-						"event_id": str(event.event_id),
-						"current_version": existing.version,
-						"message": "Activation was already processed."
-					},
-					status=status.HTTP_200_OK
-				)
+            existing = EventActivation.objects.filter(
+                automation_run_id=str(run_id)
+            ).first()
 
-			# ------------------------------------------
-			# NEW ACTIVATION
-			# ------------------------------------------
+            if existing:
 
-			new_version = event.current_version + 1
+                if existing.event_id != event.event_id:
+                    return Response(
+                        {
+                            "error": (
+                                "This automation run ID belongs "
+                                "to another event."
+                            )
+                        },
+                        status=status.HTTP_409_CONFLICT
+                    )
 
-			activation = EventActivation.objects.create(
-				event=event,
-				automation_run_id=str(run_id),
-				version=new_version,
-				scheduled_for=scheduled_for,
-				ends_at=end_time
-			)
+                return Response(
+                    {
+                        "success": True,
+                        "already_processed": True,
+                        "event_id": str(event.event_id),
+                        "current_version": existing.version,
+                        "message": "Activation was already processed."
+                    },
+                    status=status.HTTP_200_OK
+                )
 
-			event.current_version = new_version
-			event.start_time = scheduled_for
-			event.end_time = end_time
-			event.status = "ACTIVE"
-			event.is_active = True
-			event.resolved_at = None
+            # ------------------------------------------
+            # PREVIOUS ACTIVATION MUST BE RESOLVED
+            # ------------------------------------------
 
-			event.hash_code = generate_event_hash(event)
+            unresolved = (
+                EventActivation.objects
+                .filter(
+                    event=event,
+                    resolved_at__isnull=True
+                )
+                .order_by("-version")
+                .first()
+            )
 
-			event.save()
+            if unresolved:
 
-			bump_event_manifest()
+                return Response(
+                    {
+                        "success": False,
+                        "deferred": True,
+                        "reason": "EVENT_STILL_RESOLVING",
+                        "event_id": str(event.event_id),
+                        "previous_version": unresolved.version,
+                        "message": (
+                            "The previous event activation "
+                            "has not finished resolving."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
 
-		return Response(
-			{
-				"success": True,
-				"already_processed": False,
-				"event_id": str(event.event_id),
-				"current_version": new_version,
-				"activation_id": activation.pk,
-				"message": "Event activated successfully."
-			},
-			status=status.HTTP_200_OK
-		)
+            # ------------------------------------------
+            # CREATE NEW ACTIVATION
+            # ------------------------------------------
 
-	except (ValueError, ValidationError) as error:
-		return event_error_response(error)
+            new_version = event.current_version + 1
 
-	except Exception:
-		logger.exception(
-			"Failed to activate automated event."
-		)
+            activation = EventActivation.objects.create(
+                event=event,
+                automation_run_id=str(run_id),
+                version=new_version,
+                scheduled_for=scheduled_for,
+                ends_at=end_time
+            )
 
-		return Response(
-			{
-				"error": "An unexpected error occurred while activating the event."
-			},
-			status=status.HTTP_500_INTERNAL_SERVER_ERROR
-		)
+            event.current_version = new_version
+            event.start_time = scheduled_for
+            event.end_time = end_time
+            event.status = "ACTIVE"
+            event.is_active = True
+            event.resolved_at = None
+
+            event.hash_code = generate_event_hash(event)
+
+            event.save()
+
+            bump_event_manifest()
+
+        return Response(
+            {
+                "success": True,
+                "already_processed": False,
+                "event_id": str(event.event_id),
+                "current_version": new_version,
+                "activation_id": activation.pk,
+                "message": "Event activated successfully."
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except (ValueError, ValidationError) as error:
+        return event_error_response(error)
+
+    except Exception:
+        logger.exception(
+            "Failed to activate automated event."
+        )
+
+        return Response(
+            {
+                "error": (
+                    "An unexpected error occurred while "
+                    "activating the event."
+                )
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 # ============================================================
 # CREATE EVENT
 # ============================================================
@@ -703,3 +738,178 @@ def delete_event(request):
 			{"error": "An unexpected error occurred while deleting the event."},
 			status=status.HTTP_500_INTERNAL_SERVER_ERROR
 		)
+
+# ============================================================
+# DEACTIVATE AUTOMATED EVENT
+# ============================================================
+
+@api_view(["POST"])
+def deactivate_automated_event(request):
+
+    authenticated, response = control_center_authenticated(request)
+
+    if not authenticated:
+        return response
+
+    event_id = request.data.get("event_id")
+    run_id = request.data.get("deactivation_run_id")
+
+    if not event_id or not run_id:
+        return Response(
+            {
+                "error": (
+                    "Missing event_id or deactivation_run_id."
+                )
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+        scheduled_for = parse_event_datetime(
+            request.data.get("scheduled_for")
+        )
+
+        if scheduled_for is None:
+            raise ValueError(
+                "Missing scheduled deactivation time."
+            )
+
+        with transaction.atomic():
+
+            try:
+                event = EventEntry.objects.select_for_update().get(
+                    event_id=event_id
+                )
+
+            except EventEntry.DoesNotExist:
+                return Response(
+                    {"error": "Event not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # ------------------------------------------
+            # IDEMPOTENCY
+            # ------------------------------------------
+
+            existing = EventActivation.objects.filter(
+                deactivation_run_id=str(run_id)
+            ).first()
+
+            if existing:
+
+                if existing.event_id != event.event_id:
+                    return Response(
+                        {
+                            "error": (
+                                "This deactivation run ID belongs "
+                                "to another event."
+                            )
+                        },
+                        status=status.HTTP_409_CONFLICT
+                    )
+
+                return Response(
+                    {
+                        "success": True,
+                        "already_processed": True,
+                        "version": existing.version,
+                        "message": "Deactivation was already processed."
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            # ------------------------------------------
+            # FIND EXACT ACTIVATION
+            # ------------------------------------------
+
+            activation = (
+                EventActivation.objects
+                .select_for_update()
+                .filter(
+                    event=event,
+                    ends_at=scheduled_for
+                )
+                .first()
+            )
+
+            if activation is None:
+                return Response(
+                    {
+                        "error": (
+                            "No activation matches this "
+                            "scheduled deactivation."
+                        )
+                    },
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            if activation.ended_at is not None:
+                return Response(
+                    {
+                        "error": (
+                            "This activation was already "
+                            "deactivated by another run."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT
+                )
+
+            # ------------------------------------------
+            # CLOSE ACTIVATION
+            # ------------------------------------------
+
+            activation.ended_at = scheduled_for
+            activation.deactivation_run_id = str(run_id)
+
+            activation.save(
+                update_fields=[
+                    "ended_at",
+                    "deactivation_run_id"
+                ]
+            )
+
+            # ------------------------------------------
+            # UPDATE CURRENT EVENT
+            # ------------------------------------------
+
+            # Do not let an older activation change the
+            # visible state of a newer activation.
+            if event.current_version == activation.version:
+
+                event.is_active = False
+                event.status = "RESOLVING"
+                event.resolved_at = None
+
+                event.hash_code = generate_event_hash(event)
+
+                event.save()
+
+                bump_event_manifest()
+
+        return Response(
+            {
+                "success": True,
+                "version": activation.version,
+                "event_id": str(event.event_id),
+                "message": "Event deactivated and ready for resolution."
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except (ValueError, ValidationError) as error:
+        return event_error_response(error)
+
+    except Exception:
+        logger.exception(
+            "Failed to deactivate automated event."
+        )
+
+        return Response(
+            {
+                "error": (
+                    "An unexpected error occurred while "
+                    "deactivating the event."
+                )
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

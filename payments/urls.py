@@ -8,7 +8,13 @@ from .views import mark_notification_read, purchase_item, get_server_date, colle
     get_data_row, get_data_manifest
 from .validation import validation_data_listener, fetch_data, invalidate_runners
 from .notification_system import delete_notification
-from .event_admin import create_event, update_event, delete_event, activate_automated_event
+from .event_admin import (
+    create_event,
+    update_event,
+    delete_event,
+    activate_automated_event,
+    deactivate_automated_event
+)
 from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
 from .player_admin import list_players, get_player_detail, get_event_economy_data
@@ -53,4 +59,6 @@ urlpatterns = [
     path("control_center/players/delete/", delete_player, name="control_center_delete_player"),
 
     path("control_center/events/activate/", activate_automated_event, name="activate_automated_event"),
+
+    path( "control_center/events/deactivate/", deactivate_automated_event, name="deactivate_automated_event" ),
 ]
