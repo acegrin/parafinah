@@ -8,7 +8,7 @@ from .views import mark_notification_read, purchase_item, get_server_date, colle
     get_data_row, get_data_manifest
 from .validation import validation_data_listener, fetch_data, invalidate_runners
 from .notification_system import delete_notification
-from .event_admin import create_event, update_event, delete_event, activate_automated_event, get_player_data
+from .event_admin import create_event, update_event, delete_event, activate_automated_event
 from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
 from .player_admin import list_players, get_player_detail, get_event_economy_data
