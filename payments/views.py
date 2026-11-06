@@ -161,113 +161,104 @@ def sanitize_value(value):
     return value
 
 
-def record_event_participation(
-    user_id,
-    current_legend,
-    accepted_legend_events
-):
+def get_eligible_events(events, now_ms):
     """
-    Creates participation once per player/event/version.
+    Finds ranked events that are currently active and overlap
+    the timestamps in this economy batch.
 
-    Existing participation with the same version is left untouched.
-    A different version resets the participation snapshot.
+    An event must:
+    - Be enabled.
+    - Have ACTIVE status.
+    - Have already started.
+    - Not have ended yet.
+    - Overlap the incoming transaction timestamp range.
     """
 
-    if not accepted_legend_events:
-        return
+    MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
 
-    # Convert accepted timestamps to aware datetimes.
-    for award in accepted_legend_events:
-        award["datetime"] = datetime.fromtimestamp(
-            award["timestamp_utc"] / 1000,
-            tz=timezone.utc
+    timestamps = [
+        evt.get("timestampUtc")
+        for evt in events
+        if (
+            isinstance(evt, dict)
+            and isinstance(evt.get("timestampUtc"), (int, float))
+            and not isinstance(evt.get("timestampUtc"), bool)
+            and abs(now_ms - evt.get("timestampUtc")) <= MAX_TIME_DRIFT_MS
         )
+    ]
 
-    earliest = min(
-        award["datetime"] for award in accepted_legend_events
+    if not timestamps:
+        return []
+
+    earliest = datetime.fromtimestamp(
+        min(timestamps) / 1000,
+        tz=timezone.utc
     )
 
-    latest = max(
-        award["datetime"] for award in accepted_legend_events
+    latest = datetime.fromtimestamp(
+        max(timestamps) / 1000,
+        tz=timezone.utc
     )
 
-    # Find ranking events that overlap the award time range.
-    ranking_events = EventEntry.objects.filter(
-        event_type="RANKED",
-        is_active=True,
-        status="ACTIVE",
-        start_time__lte=latest
-    ).filter(
-        Q(end_time__isnull=True) |
-        Q(end_time__gt=earliest)
+    now = datetime.fromtimestamp(
+        now_ms / 1000,
+        tz=timezone.utc
     )
 
-    for event in ranking_events:
+    return list(
+        EventEntry.objects.filter(
+            event_type="RANKED",
+            is_active=True,
+            status="ACTIVE",
 
-        # Check whether at least one award belongs to this event.
-        participated = any(
-            award["datetime"] >= event.start_time
-            and (
-                event.end_time is None
-                or award["datetime"] < event.end_time
-            )
-            for award in accepted_legend_events
+            # Event must have started already.
+            start_time__lte=now,
+
+            # Event must overlap the incoming timestamps.
+            start_time__lte=latest
+        ).filter(
+            # Event must still be running now.
+            Q(end_time__isnull=True) |
+            Q(end_time__gt=now)
+        ).filter(
+            # Event must not have ended before the earliest record.
+            Q(end_time__isnull=True) |
+            Q(end_time__gt=earliest)
         )
+    )
 
-        if not participated:
+
+def get_event_ids_for_timestamp(timestamp_utc, eligible_events):
+    """
+    Returns event ID/version keys applicable to one
+    economy transaction.
+
+    Event end times are exclusive.
+    """
+
+    award_datetime = datetime.fromtimestamp(
+        timestamp_utc / 1000,
+        tz=timezone.utc
+    )
+
+    event_ids = []
+
+    for event in eligible_events:
+
+        if award_datetime < event.start_time:
             continue
 
-        with transaction.atomic():
+        if (
+            event.end_time is not None
+            and award_datetime >= event.end_time
+        ):
+            continue
 
-            participation, created = (
-                EventParticipation.objects.select_for_update().get_or_create(
-                    event=event,
-                    player_id=user_id,
-                    defaults={
-                        "version": event.current_version,
-                        "starting_legend_points": current_legend,
-                        "ending_legend_points": 0,
-                        "event_points": 0
-                    }
-                )
-            )
+        event_ids.append(
+            f"{event.event_id}:{event.current_version}"
+        )
 
-            if created:
-                logger.info(
-                    "Created event participation: user=%s event=%s version=%s",
-                    user_id,
-                    event.event_id,
-                    event.current_version
-                )
-                continue
-
-            # A new competition version requires a fresh snapshot.
-            if participation.version != event.current_version:
-
-                participation.version = event.current_version
-                participation.starting_legend_points = current_legend
-                participation.ending_legend_points = 0
-                participation.event_points = 0
-
-                participation.save(
-                    update_fields=[
-                        "version",
-                        "starting_legend_points",
-                        "ending_legend_points",
-                        "event_points",
-                        "updated_at"
-                    ]
-                )
-
-                logger.info(
-                    "Reset event participation: user=%s event=%s version=%s",
-                    user_id,
-                    event.event_id,
-                    event.current_version
-                )
-
-            # Same version: already participating. No database write.
-
+    return event_ids
 
 
 @api_view(["POST"])
@@ -327,7 +318,6 @@ def economy_sync(request):
     rewards_dirty = False
 
     suspicious_events = []
-    accepted_legend_events = []
 
     batch = db.batch()
 
@@ -337,7 +327,20 @@ def economy_sync(request):
 
     MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
 
-    # Prevent duplicate event IDs within this same request.
+    # --------------------------------------------------
+    # EVENT ELIGIBILITY
+    # --------------------------------------------------
+
+    # Query eligible events once for the entire batch.
+    eligible_events = get_eligible_events(
+        events,
+        now_ms
+    )
+
+    # --------------------------------------------------
+    # DUPLICATE PROTECTION
+    # --------------------------------------------------
+
     seen_event_ids = set()
 
     # --------------------------------------------------
@@ -376,7 +379,7 @@ def economy_sync(request):
         if not event_id:
             continue
 
-        # Duplicate inside the incoming request.
+        # Duplicate inside incoming request.
         if event_id in seen_event_ids:
             log_fraud(
                 evt,
@@ -462,7 +465,10 @@ def economy_sync(request):
         if collected_type == "gold":
 
             try:
-                level_info = LevelConfig.objects.get(level=context)
+                level_info = LevelConfig.objects.get(
+                    level=context
+                )
+
             except LevelConfig.DoesNotExist:
                 log_fraud(
                     evt,
@@ -483,12 +489,6 @@ def economy_sync(request):
 
             applied_legend += delta
 
-            # Only validated, accepted Legend events reach here.
-            accepted_legend_events.append({
-                "delta": delta,
-                "timestamp_utc": timestamp_utc
-            })
-
         # --------------------------------------------------
         # CARDS / MISSIONS
         # --------------------------------------------------
@@ -504,7 +504,10 @@ def economy_sync(request):
             if is_story:
 
                 try:
-                    required_total = int(context.split("-")[1])
+                    required_total = int(
+                        context.split("-")[1]
+                    )
+
                 except (IndexError, ValueError):
                     log_fraud(
                         evt,
@@ -522,6 +525,7 @@ def economy_sync(request):
                         mission_id=mission_id,
                         is_active=True
                     )
+
                 except Mission.DoesNotExist:
                     log_fraud(
                         evt,
@@ -598,7 +602,16 @@ def economy_sync(request):
             continue
 
         # --------------------------------------------------
-        # QUEUE ACCEPTED EVENT FOR FIRESTORE
+        # EVENT ATTRIBUTION
+        # --------------------------------------------------
+
+        eligible_event_ids = get_event_ids_for_timestamp(
+            timestamp_utc,
+            eligible_events
+        )
+
+        # --------------------------------------------------
+        # SAVE ACCEPTED ECONOMY EVENT
         # --------------------------------------------------
 
         batch.set(event_ref, {
@@ -609,6 +622,11 @@ def economy_sync(request):
             "timestampUtc": timestamp_utc,
             "sourceId": source_id,
             "context": context,
+
+            # Competition attribution.
+            # Format: eventId:version
+            "eventIds": eligible_event_ids,
+
             "clientVersion": client_version,
             "deviceId": device_id,
             "serverTimestamp": now_ts
@@ -653,25 +671,6 @@ def economy_sync(request):
             "lastUpdatedUtc": now_ts,
             "events": firestore.ArrayUnion(suspicious_events)
         }, merge=True)
-
-    # --------------------------------------------------
-    # EVENT PARTICIPATION
-    # --------------------------------------------------
-
-    if accepted_legend_events:
-
-        try:
-            record_event_participation(
-                user_id=user_id,
-                current_legend=current_legend,
-                accepted_legend_events=accepted_legend_events
-            )
-
-        except Exception:
-            logger.exception(
-                "Failed to record event participation for user %s",
-                user_id
-            )
 
     # --------------------------------------------------
     # GLOBAL LEADERBOARD
