@@ -229,7 +229,7 @@ def get_eligible_events(events, now_ms, collected_type):
     )
 
 
-def get_event_ids_for_timestamp(timestamp_utc, collected_type):
+def get_event_ids_for_timestamp(events, timestamp_utc, collected_type):
     """
     Returns event ID/version keys applicable to one
     economy transaction.
@@ -607,6 +607,7 @@ def economy_sync(request):
         # --------------------------------------------------
 
         eligible_event_ids = get_event_ids_for_timestamp(
+            events,
             timestamp_utc,
             collected_type
         )
