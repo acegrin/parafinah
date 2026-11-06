@@ -205,17 +205,18 @@ def get_eligible_events(events, now_ms):
         tz=timezone.utc
     )
 
+    # The event must have started already (start_time <= now) AND must
+    # have started before the latest incoming timestamp (start_time <= latest).
+    # Both conditions collapse into one bound: the earlier of the two.
+    # (Passing start_time__lte twice is a SyntaxError in Python.)
+    start_bound = min(now, latest)
+
     return list(
         EventEntry.objects.filter(
             event_type="RANKED",
             is_active=True,
             status="ACTIVE",
-
-            # Event must have started already.
-            start_time__lte=now,
-
-            # Event must overlap the incoming timestamps.
-            start_time__lte=latest
+            start_time__lte=start_bound
         ).filter(
             # Event must still be running now.
             Q(end_time__isnull=True) |
