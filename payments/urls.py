@@ -19,6 +19,11 @@ from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
 from .player_admin import list_players, get_player_detail, get_event_economy_data
 from .player_admin import delete_player
+from .event_resolution import (
+    get_pending_event_resolutions,
+    submit_event_resolution,
+    process_event_resolution
+)
 
 urlpatterns = [
     path('purchase_item/', purchase_item, name='purchase_item'),
@@ -61,4 +66,22 @@ urlpatterns = [
     path("control_center/events/activate/", activate_automated_event, name="activate_automated_event"),
 
     path( "control_center/events/deactivate/", deactivate_automated_event, name="deactivate_automated_event" ),
+
+    path(
+        "control_center/events/resolution/pending/",
+        get_pending_event_resolutions,
+        name="control_center_pending_event_resolutions"
+    ),
+
+    path(
+        "control_center/events/resolution/submit/",
+        submit_event_resolution,
+        name="control_center_submit_event_resolution"
+    ),
+
+    path(
+        "control_center/events/resolution/process/",
+        process_event_resolution,
+        name="control_center_process_event_resolution"
+    ),
 ]
