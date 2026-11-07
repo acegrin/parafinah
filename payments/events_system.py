@@ -16,6 +16,8 @@ def get_events_manifest(current_manifest_version):
         }
     )
 
+    print(f"Server Version: {state.version}  Client Version: {current_manifest_version}")
+
     if state.version == current_manifest_version:
         return {
             "new_data_available": False,

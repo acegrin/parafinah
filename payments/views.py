@@ -517,41 +517,22 @@ def economy_sync(request):
 
             is_story = context.startswith("Story")
 
-            if is_story:
+            try:
+                mission_def = Mission.objects.get(
+                    mission_id=mission_id,
+                    is_active=True
+                )
 
-                try:
-                    required_total = int(
-                        context.split("-")[1]
-                    )
+            except Mission.DoesNotExist:
+                log_fraud(
+                    evt,
+                    "invalid_mission",
+                    "Mission not found",
+                    severity="high"
+                )
+                continue
 
-                except (IndexError, ValueError):
-                    log_fraud(
-                        evt,
-                        "invalid_story_context",
-                        "Invalid story context",
-                        {"context": context},
-                        "high"
-                    )
-                    continue
-
-            else:
-
-                try:
-                    mission_def = Mission.objects.get(
-                        mission_id=mission_id,
-                        is_active=True
-                    )
-
-                except Mission.DoesNotExist:
-                    log_fraud(
-                        evt,
-                        "invalid_mission",
-                        "Mission not found",
-                        severity="high"
-                    )
-                    continue
-
-                required_total = mission_def.target_value
+            required_total = mission_def.target_value
 
             applied_cards += 1
             missions_dirty = True
@@ -1017,6 +998,7 @@ def get_data_manifest(request):
     if data_type == "world":
         return Response(get_world_manifest(current_manifest_version))
     if data_type == "event":
+        print("Event request detected")
         return Response(get_events_manifest(current_manifest_version))
     if data_type == "package":
         return  Response(get_package_manifest(current_manifest_version))
