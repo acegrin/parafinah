@@ -5,7 +5,6 @@ from payments.models import DataManifestStateEntry, PublishedSnapshot
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 
-
 def get_events_manifest(current_manifest_version):
 
     state, _ = DataManifestStateEntry.objects.get_or_create(
@@ -31,6 +30,7 @@ def get_events_manifest(current_manifest_version):
             "new_data_available": False,
         }
 
+    # NEW data source (from PublishedSnapshot)
     articles = [
         {
             "id": str(record["data"]["event_id"]),
@@ -41,17 +41,21 @@ def get_events_manifest(current_manifest_version):
         and record["data"].get("event_id")
     ]
 
+    # OLD data source (exact replica of your original EventEntry code)
+    old_articles_query = EventEntry.objects.values(
+        "event_id",
+        "updated_at"
+    )
+
     old = {
         "new_data_available": True,
         "version": state.version,
         "articles": [
             {
-                "id": str(a["data"]["event_id"]),
-                "updated_at": 0
+                "id": str(a["event_id"]),
+                "updated_at": int(a["updated_at"].timestamp())
             }
-            for a in snapshot.records
-            if isinstance(a.get("data"), dict)
-            and a["data"].get("event_id")
+            for a in old_articles_query
         ]
     }
 
@@ -69,9 +73,6 @@ def get_events_manifest(current_manifest_version):
         "version": state.version,
         "articles": articles,
     }
-
-
-
 
 def get_events_article(event_id):
 
