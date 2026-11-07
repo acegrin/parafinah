@@ -46,10 +46,12 @@ def get_events_manifest(current_manifest_version):
         "version": state.version,
         "articles": [
             {
-                "id": str(a["event_id"]),
+                "id": str(a["data"]["event_id"]),
                 "updated_at": 0
             }
             for a in snapshot.records
+            if isinstance(a.get("data"), dict)
+            and a["data"].get("event_id")
         ]
     }
 

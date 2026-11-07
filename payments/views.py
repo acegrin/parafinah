@@ -981,8 +981,6 @@ def get_data_manifest(request):
     user_id = request.data.get('user_id')
     current_manifest_version = request.data.get('current_manifest_version')
 
-    print("GetDataManifest Called")
-
     if not data_type:
         return Response(
             {"error": "data_type is required"},
