@@ -1,7 +1,7 @@
 
 # event_system.py
 
-from payments.models import DataManifestStateEntry, PublishedSnapshot
+from payments.models import DataManifestStateEntry, PublishedSnapshot, EventEntry
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 
@@ -47,23 +47,29 @@ def get_events_manifest(current_manifest_version):
     }
 
 def get_events_article(event_id):
-    print(f"Get events called for ID: {event_id}")
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="event")
 
     except PublishedSnapshot.DoesNotExist:
         raise Http404("Event snapshot not found")
 
-    print("Snapshot loaded")
     for record in snapshot.records:
 
         data = record.get("data")
 
         if not isinstance(data, dict):
             continue
-        print("Record Found")
+
         if str(data.get("event_id")) == str(event_id):
-            print(f"Returned: {data}")
+            print(f"New: {data}")
+
+            try:
+                article = EventEntry.objects.get(event_id=event_id)
+            except EventEntry.DoesNotExist:
+                raise Http404("Article not found")
+
+            print(f"Old: {article.to_dict()}")
+            
             return JsonResponse(data)
 
     raise Http404("Event Article not found")
