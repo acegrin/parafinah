@@ -63,7 +63,7 @@ def get_events_article(event_id):
             continue
         print("Record Found")
         if str(data.get("event_id")) == str(event_id):
-            print(f"Returned: {data}")
+            print(f"Returned Image: {data.get('image')}")
             return JsonResponse(data)
 
     raise Http404("Event Article not found")
