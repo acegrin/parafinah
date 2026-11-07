@@ -90,17 +90,17 @@ def get_events_article(event_id):
 
         article = {
             "id": str(data.get("event_id")),
-            "current_version": int(data.get("current_version", 1)),
-            "payload_structure": data.get("payload_structure", ""),
-            "title": data.get("title", ""),
-            "description": data.get("description", ""),
-            "banner": data.get("banner", ""),
+            "current_version": int(data.get("current_version", 0)),
+            "payload_structure": data.get("payload_structure"),
+            "title": data.get("title"),
+            "description": data.get("description"),
+            "banner": data.get("image", ""),
             "start_time": _to_unix_timestamp(data.get("start_time")),
             "end_time": _to_unix_timestamp(data.get("end_time")),
             "created_at": _to_unix_timestamp(data.get("created_at")),
             "updated_at": _to_unix_timestamp(data.get("updated_at")),
             "rewards": json.dumps(data.get("rewards", {})),
-            "status": data.get("status", "ACTIVE"),
+            "status": data.get("status"),
             "seen": False,
         }
 
