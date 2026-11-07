@@ -1,7 +1,7 @@
 
 # event_system.py
 
-from payments.models import DataManifestStateEntry, PublishedSnapshot
+from payments.models import DataManifestStateEntry, PublishedSnapshot, EventEntry
 from django.http import JsonResponse, Http404
 from django.utils import timezone
 
