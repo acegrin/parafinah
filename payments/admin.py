@@ -583,5 +583,5 @@ class EventParticipationAdmin(admin.ModelAdmin):
 
 @admin.register(PublishedSnapshot)
 class PublishedSnapshotAdmin(admin.ModelAdmin):
-    list_display = "data_type"
+    list_display = ("data_type", "records")
     list_filter = ("updated_at", "data_type", "records")
