@@ -969,3 +969,21 @@ class EventParticipation(models.Model):
                 name="event_participation_rank_idx"
             )
         ]
+
+
+class PublishedSnapshot(models.Model):
+
+    data_type = models.CharField(
+        max_length=32,
+        unique=True
+    )
+
+    records = models.JSONField(default=list)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["data_type"]
+
+    def __str__(self):
+        return f"{self.data_type} snapshot"
