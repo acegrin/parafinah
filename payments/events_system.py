@@ -1,9 +1,34 @@
-
 # event_system.py
 
-from payments.models import DataManifestStateEntry, PublishedSnapshot, EventEntry
+import json
+
+from datetime import datetime
+
+from payments.models import DataManifestStateEntry, PublishedSnapshot
 from django.http import JsonResponse, Http404
 from django.utils import timezone
+
+
+def _to_unix_timestamp(value):
+
+    if value is None:
+        return 0
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return 0
+
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.utc)
+
+    return int(value.timestamp())
+
 
 def get_events_manifest(current_manifest_version):
 
@@ -16,7 +41,6 @@ def get_events_manifest(current_manifest_version):
     )
 
     if state.version == current_manifest_version:
-        print("No new data available")
         return {
             "new_data_available": False,
         }
@@ -25,7 +49,6 @@ def get_events_manifest(current_manifest_version):
         snapshot = PublishedSnapshot.objects.get(data_type="event")
 
     except PublishedSnapshot.DoesNotExist:
-
         return {
             "new_data_available": False,
         }
@@ -46,7 +69,9 @@ def get_events_manifest(current_manifest_version):
         "articles": articles,
     }
 
+
 def get_events_article(event_id):
+
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="event")
 
@@ -60,16 +85,27 @@ def get_events_article(event_id):
         if not isinstance(data, dict):
             continue
 
-        if str(data.get("event_id")) == str(event_id):
-            print(f"New: {data}")
+        if str(data.get("event_id")) != str(event_id):
+            continue
 
-            try:
-                article = EventEntry.objects.get(title="RUSH 24H")
-            except EventEntry.DoesNotExist:
-                raise Http404("Article not found")
+        article = {
+            "id": str(data.get("event_id")),
+            "current_version": int(data.get("current_version", 1)),
+            "payload_structure": data.get("payload_structure", ""),
+            "title": data.get("title", ""),
+            "description": data.get("description", ""),
+            "banner": data.get("banner", ""),
+            "start_time": _to_unix_timestamp(data.get("start_time")),
+            "end_time": _to_unix_timestamp(data.get("end_time")),
+            "created_at": _to_unix_timestamp(data.get("created_at")),
+            "updated_at": _to_unix_timestamp(data.get("updated_at")),
+            "rewards": json.dumps(data.get("rewards", {})),
+            "status": data.get("status", "ACTIVE"),
+            "seen": False,
+        }
 
-            print(f"Old: {article.to_dict()}")
+        print(f"New: {article}")
 
-            return JsonResponse(data)
+        return JsonResponse(article)
 
     raise Http404("Event Article not found")
