@@ -16,8 +16,6 @@ def get_events_manifest(current_manifest_version):
         }
     )
 
-    print(f"Server Version: {state.version}  Client Version: {current_manifest_version}")
-
     if state.version == current_manifest_version:
         print("No new data available")
         return {
@@ -26,7 +24,6 @@ def get_events_manifest(current_manifest_version):
 
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="event")
-        print(f"New data available")
 
     except PublishedSnapshot.DoesNotExist:
 
@@ -44,13 +41,34 @@ def get_events_manifest(current_manifest_version):
         and record["data"].get("event_id")
     ]
 
-    print(f"Articles: {articles}")
+    old = {
+        "new_data_available": True,
+        "version": state.version,
+        "articles": [
+            {
+                "id": str(a["event_id"]),
+                "updated_at": 0
+            }
+            for a in snapshot.records
+        ]
+    }
+
+    new = {
+        "new_data_available": True,
+        "version": state.version,
+        "articles": articles,
+    }
+
+    print(f"old Articles: {old}")
+    print(f"new Articles: {new}")
 
     return {
         "new_data_available": True,
         "version": state.version,
         "articles": articles,
     }
+
+
 
 
 def get_events_article(event_id):
