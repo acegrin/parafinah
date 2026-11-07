@@ -790,7 +790,10 @@ class NewsEntry(models.Model):
         ordering = ["created_at"]
 
 class DataManifestStateEntry(models.Model):
-    data_type = models.CharField(max_length=128)
+    data_type = models.CharField(
+        max_length=128,
+        unique=True
+    )
     version = models.PositiveIntegerField(default=1)
     updated_at = models.DateTimeField(auto_now=True)
 
