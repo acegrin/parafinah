@@ -219,6 +219,27 @@ def resolve_objectives_data():
             """
     return [m.to_dict() for m in LevelConfig.objects.all()]
 
+def _to_unix_timestamp(value):
+
+    if value is None:
+        return None
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.utc)
+
+    return int(value.timestamp())
+
+
 def get_mission_manifest(current_manifest_version):
 
     state, _ = DataManifestStateEntry.objects.get_or_create(
@@ -236,6 +257,7 @@ def get_mission_manifest(current_manifest_version):
 
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="mission")
+
     except PublishedSnapshot.DoesNotExist:
         return {
             "new_data_available": False,
@@ -246,6 +268,9 @@ def get_mission_manifest(current_manifest_version):
     for record in snapshot.records:
 
         data = record.get("data", {})
+
+        if not isinstance(data, dict):
+            continue
 
         # Preserve the previous STANDARD mission filtering.
         if data.get("mission_type", "STANDARD") != "STANDARD":
@@ -267,18 +292,39 @@ def get_mission_article(article_uid):
 
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="mission")
+
     except PublishedSnapshot.DoesNotExist:
         raise Http404("Mission snapshot not found")
 
     for record in snapshot.records:
 
-        if str(record.get("id")) == str(article_uid):
+        if str(record.get("id")) != str(article_uid):
+            continue
 
-            data = record.get("data")
+        data = record.get("data")
 
-            if not isinstance(data, dict):
-                raise Http404("Invalid mission record")
+        if not isinstance(data, dict):
+            raise Http404("Invalid mission record")
 
-            return JsonResponse(data)
+        article = {
+            "mission_id": data.get("mission_id"),
+            "level": data.get("level"),
+            "title": data.get("title"),
+            "progress_mode": data.get("progress_mode"),
+            "time_scope": data.get("time_scope"),
+            "resolution_mode": data.get("resolution_mode"),
+            "banner": data.get("banner", data.get("image", "")),
+            "start_time": _to_unix_timestamp(data.get("start_time")),
+            "end_time": _to_unix_timestamp(data.get("end_time")),
+            "progress_definition": data.get("progress_definition"),
+            "target_value": data.get("target_value"),
+            "rewards": data.get("rewards"),
+            "status": data.get("status"),
+            "hash_code": data.get("hash_code"),
+        }
+
+        print(f"New Mission: {article}")
+
+        return JsonResponse(article)
 
     raise Http404("Mission Article not found")
