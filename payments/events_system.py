@@ -26,7 +26,7 @@ def get_events_manifest(current_manifest_version):
 
     try:
         snapshot = PublishedSnapshot.objects.get(data_type="event")
-        print(f"New data available. Count: {snapshot.records.count()}")
+        print(f"New data available")
 
     except PublishedSnapshot.DoesNotExist:
 
