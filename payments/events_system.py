@@ -64,12 +64,12 @@ def get_events_article(event_id):
             print(f"New: {data}")
 
             try:
-                article = EventEntry.objects.get(event_id=event_id)
+                article = EventEntry.objects.get(title="RUSH 24H")
             except EventEntry.DoesNotExist:
                 raise Http404("Article not found")
 
             print(f"Old: {article.to_dict()}")
-            
+
             return JsonResponse(data)
 
     raise Http404("Event Article not found")
