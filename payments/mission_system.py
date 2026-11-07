@@ -9,7 +9,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.http import JsonResponse, Http404
 
-from payments.models import Mission, LevelConfig, EventEntry, DataManifestStateEntry
+from payments.models import Mission, LevelConfig, EventEntry, DataManifestStateEntry, PublishedSnapshot
 from payments.services.firestore_missions import push_mission_to_firestore
 
 
@@ -220,10 +220,11 @@ def resolve_objectives_data():
     return [m.to_dict() for m in LevelConfig.objects.all()]
 
 def get_mission_manifest(current_manifest_version):
-    state, created = DataManifestStateEntry.objects.get_or_create(
+
+    state, _ = DataManifestStateEntry.objects.get_or_create(
         data_type="mission",
         defaults={
-            "version": 1,
+            "version": 0,
             "updated_at": timezone.now(),
         }
     )
@@ -233,34 +234,51 @@ def get_mission_manifest(current_manifest_version):
             "new_data_available": False,
         }
 
+    try:
+        snapshot = PublishedSnapshot.objects.get(data_type="mission")
+    except PublishedSnapshot.DoesNotExist:
+        return {
+            "new_data_available": False,
+        }
 
-    # If the state was just created, you can optionally
-    # perform any one-time initialization logic here
-    if created:
-        # Example: log, seed data, etc.
-        pass
+    articles = []
 
-    articles = Mission.objects.values(
-        "mission_id",
-        "created_at"
-    ).filter(mission_type="STANDARD")
+    for record in snapshot.records:
+
+        data = record.get("data", {})
+
+        # Preserve the previous STANDARD mission filtering.
+        if data.get("mission_type", "STANDARD") != "STANDARD":
+            continue
+
+        articles.append({
+            "id": str(record["id"]),
+            "updated_at": int(record["updated_at"]),
+        })
 
     return {
         "new_data_available": True,
         "version": state.version,
-        "articles": [
-            {
-                "id": str(a["mission_id"]),
-                "updated_at": int(a["created_at"].timestamp())
-            }
-            for a in articles
-        ]
+        "articles": articles,
     }
 
-def get_mission_article(article_uid):
-    try:
-        article = Mission.objects.get(mission_id=article_uid)
-    except Mission.DoesNotExist:
-        raise Http404("Article not found")
 
-    return JsonResponse(article.to_dict())
+def get_mission_article(article_uid):
+
+    try:
+        snapshot = PublishedSnapshot.objects.get(data_type="mission")
+    except PublishedSnapshot.DoesNotExist:
+        raise Http404("Mission snapshot not found")
+
+    for record in snapshot.records:
+
+        if str(record.get("id")) == str(article_uid):
+
+            data = record.get("data")
+
+            if not isinstance(data, dict):
+                raise Http404("Invalid mission record")
+
+            return JsonResponse(data)
+
+    raise Http404("Mission Article not found")
