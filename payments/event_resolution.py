@@ -182,22 +182,25 @@ def create_event_result_notification(
         16
     ) % (10 ** 18)
 
-    # get_or_create prevents duplicate notifications
-    # when the same batch is submitted again.
+    # Use get_or_create with matching defaults
     notification, created = (
-        NotificationEntry.create_from_image_url(
+        NotificationEntry.objects.get_or_create(
             user_id=user_id,
-            title=title,
-            description=description,
-            image_url=(
-                "https://parafinah.pythonanywhere.com/"
-                "media/unordered/NotificationIconBlackNWhite.png"
-            )
+            hash_code=hash_code,
+            defaults={
+                "title": title,
+                "description": description,
+                "seen": False,
+                # Include image_url if your NotificationEntry model requires it
+                "image_url": (
+                    "https://parafinah.pythonanywhere.com/"
+                    "media/unordered/NotificationIconBlackNWhite.png"
+                )
+            }
         )
     )
 
     return created
-
 
 # ============================================================
 # VALIDATION HELPERS
