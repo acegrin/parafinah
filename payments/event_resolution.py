@@ -93,6 +93,8 @@ def submit_event_resolution(request):
     version = request.data.get("version")
     results = request.data.get("results")
 
+    print(f"Event ID: {event_id}, Version: {version}, Results: {results}")
+
     if not event_id or version is None or results is None:
         return Response(
             {
