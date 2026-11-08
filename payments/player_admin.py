@@ -1,4 +1,3 @@
-
 # player_admin.py
 
 import logging
@@ -6,6 +5,7 @@ import logging
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
+from google.cloud.firestore import FieldFilter
 
 from .firebase_client import db, firebase_auth
 from .event_admin import control_center_authenticated
@@ -42,9 +42,7 @@ def get_event_economy_data(request):
         documents = (
             db.collection_group("economy_events")
             .where(
-                "eventIds",
-                "array_contains",
-                event_token
+                filter=FieldFilter("eventIds", "array_contains", event_token)
             )
             .stream()
         )

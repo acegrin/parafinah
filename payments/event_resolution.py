@@ -187,12 +187,12 @@ def create_event_result_notification(
     notification, created = (
         NotificationEntry.objects.get_or_create(
             user_id=user_id,
-            hash_code=hash_code,
-            defaults={
-                "title": title,
-                "description": description,
-                "seen": False
-            }
+            title= title,
+            description = description,
+            image_url=(
+                "https://parafinah.pythonanywhere.com/"
+                "media/unordered/NotificationIconBlackNWhite.png"
+            )
         )
     )
 
