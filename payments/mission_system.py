@@ -323,8 +323,6 @@ def get_mission_article(article_uid):
             "hash_code": data.get("hash_code"),
         }
 
-        print(f"New Mission: {article}")
-
         return JsonResponse(article)
 
     raise Http404("Mission Article not found")

@@ -74,11 +74,11 @@ urlpatterns = [
     #     name="control_center_pending_event_resolutions"
     # ),
     #
-    # path(
-    #     "control_center/events/resolution/submit/",
-    #     submit_event_resolution,
-    #     name="control_center_submit_event_resolution"
-    # ),
+    path(
+        "control_center/events/resolution/submit/",
+        submit_event_resolution,
+        name="control_center_submit_event_resolution"
+    ),
     #
     # path(
     #     "control_center/events/resolution/process/",

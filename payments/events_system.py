@@ -104,8 +104,6 @@ def get_events_article(event_id):
             "seen": False,
         }
 
-        print(f"New: {article}")
-
         return JsonResponse(article)
 
     raise Http404("Event Article not found")

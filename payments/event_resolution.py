@@ -1,4 +1,3 @@
-
 # payments/event_resolution.py
 
 import hashlib
@@ -166,17 +165,6 @@ def submit_event_resolution(request):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            if activation.ended_at is None:
-                return Response(
-                    {
-                        "error": (
-                            "This activation has not been "
-                            "deactivated yet."
-                        )
-                    },
-                    status=status.HTTP_409_CONFLICT
-                )
-
             if activation.resolved_at is not None:
                 return Response(
                     {
@@ -184,6 +172,23 @@ def submit_event_resolution(request):
                         "already_resolved": True,
                         "message": "Activation is already resolved."
                     }
+                )
+
+            # --------------------------------------
+            # THE CONTROL CENTER DECIDES WHEN A RUN ENDED
+            # --------------------------------------
+            #
+            # The Control Center only submits after the event's
+            # end time has passed, and this endpoint is already
+            # authenticated with its key. Record the end here
+            # instead of waiting for a sync to say so.
+
+            if activation.ended_at is None:
+
+                activation.ended_at = timezone.now()
+
+                activation.save(
+                    update_fields=["ended_at"]
                 )
 
             # --------------------------------------
@@ -295,6 +300,15 @@ def submit_event_resolution(request):
 # IDEMPOTENT FIRESTORE GOLD ISSUANCE
 # ============================================================
 
+class PlayerNotFound(ValueError):
+
+    """
+    The player document does not exist (for example a deleted
+    account). There is nobody to pay, and retrying will never
+    change that, so it must not block the rest of the event.
+    """
+
+
 def issue_event_gold(participant):
 
     """
@@ -351,7 +365,7 @@ def issue_event_gold(participant):
         )
 
         if not player_snapshot.exists:
-            raise ValueError(
+            raise PlayerNotFound(
                 f"Player not found: {participant.user_id}"
             )
 
@@ -558,7 +572,23 @@ def process_event_resolution(request):
         for participant in pending:
 
             # Gold is independently idempotent in Firestore.
-            issue_event_gold(participant)
+            # Any other failure (network, Firestore outage) is raised
+            # so the whole call can be retried safely.
+            try:
+                issue_event_gold(participant)
+
+            except PlayerNotFound:
+
+                # Nobody to pay; do not let one missing account
+                # block every other player in the event.
+                logger.warning(
+                    "Skipping Gold for missing player %s "
+                    "(event %s, version %s, %s Gold).",
+                    participant.user_id,
+                    activation.event_id,
+                    activation.version,
+                    participant.gold_reward
+                )
 
             EventResolutionParticipant.objects.filter(
                 pk=participant.pk

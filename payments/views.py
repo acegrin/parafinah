@@ -515,8 +515,6 @@ def economy_sync(request):
             card_level = delta
             collected_at = timestamp_utc
 
-            is_story = context.startswith("Story")
-
             try:
                 mission_def = Mission.objects.get(
                     mission_id=mission_id,
