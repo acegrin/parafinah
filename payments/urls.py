@@ -22,7 +22,7 @@ from .player_admin import delete_player
 from .control_center_admin import  control_center_sync
 from .event_resolution import (
     get_pending_event_resolutions,
-    submit_event_resolution,
+    process_batch_resolution,
     process_event_resolution
 )
 
@@ -68,11 +68,7 @@ urlpatterns = [
 
     path( "control_center/events/deactivate/", deactivate_automated_event, name="deactivate_automated_event" ),
 
-    path("control_center/events/resolution/pending/", get_pending_event_resolutions, name="control_center_pending_event_resolutions"),
-
-    path("control_center/events/resolution/submit/", submit_event_resolution, name="control_center_submit_event_resolution"),
-
-    path("control_center/events/resolution/process/", process_event_resolution, name="control_center_process_event_resolution"),
+    path("control_center/events/resolution/process_batch/", process_batch_resolution, name="control_center_process_batch_resolution"),
 
     path("control_center/sync/", control_center_sync, name="control_center_sync"),
 ]

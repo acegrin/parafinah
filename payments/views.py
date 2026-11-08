@@ -996,7 +996,6 @@ def get_data_manifest(request):
     if data_type == "world":
         return Response(get_world_manifest(current_manifest_version))
     if data_type == "event":
-        print("Event request detected")
         return Response(get_events_manifest(current_manifest_version))
     if data_type == "package":
         return  Response(get_package_manifest(current_manifest_version))
