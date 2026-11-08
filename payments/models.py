@@ -374,10 +374,8 @@ class EventEntry(models.Model):
 
 class EventActivation(models.Model):
 
-    event = models.ForeignKey(
-        EventEntry,
-        on_delete=models.CASCADE,
-        related_name="activations"
+    event_id = models.CharField(
+        max_length=64, default="123"
     )
 
     automation_run_id = models.CharField(
