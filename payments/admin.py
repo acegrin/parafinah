@@ -5,7 +5,7 @@ from django.shortcuts import render, redirect
 from django import forms
 from django.core.exceptions import ValidationError
 from .models import RunnerEntry, LevelConfig, EventEntry, NotificationEntry, NewsEntry, NewsManifestState, \
-    DataManifestStateEntry, PackageEntry, WorldEntry, EventParticipation, PublishedSnapshot
+    DataManifestStateEntry, PackageEntry, WorldEntry, EventParticipation, PublishedSnapshot, EventActivation
 from .admin_forms import MissionGeneratorForm
 from .mission_system import build_mission_preview, save_mission_from_preview
 from .validation import bump_validation_code
@@ -585,3 +585,8 @@ class EventParticipationAdmin(admin.ModelAdmin):
 class PublishedSnapshotAdmin(admin.ModelAdmin):
     list_display = ("data_type", "records")
     list_filter = ("updated_at", "data_type", "records")
+
+@admin.register(EventActivation)
+class EventActivationAdmin(admin.ModelAdmin):
+    ist_display = ("event", "automation_run_id")
+    list_filter = ("activated_at", "ends_at", "ended_at")
