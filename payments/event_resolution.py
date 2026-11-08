@@ -185,10 +185,10 @@ def create_event_result_notification(
     # get_or_create prevents duplicate notifications
     # when the same batch is submitted again.
     notification, created = (
-        NotificationEntry.objects.get_or_create(
+        NotificationEntry.create_from_image_url(
             user_id=user_id,
-            title= title,
-            description = description,
+            title=title,
+            description=description,
             image_url=(
                 "https://parafinah.pythonanywhere.com/"
                 "media/unordered/NotificationIconBlackNWhite.png"
