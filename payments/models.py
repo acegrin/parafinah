@@ -374,6 +374,12 @@ class EventEntry(models.Model):
 
 class EventActivation(models.Model):
 
+    event = models.ForeignKey(
+        EventEntry,
+        on_delete=models.CASCADE,
+        related_name="activations"
+    )
+
     event_id = models.CharField(
         max_length=64, default="123"
     )
@@ -426,7 +432,7 @@ class EventActivation(models.Model):
         ordering = ["version"]
         constraints = [
             models.UniqueConstraint(
-                fields=["event_id", "version"],
+                fields=["event", "version"],
                 name="unique_event_activation_version"
             )
         ]
