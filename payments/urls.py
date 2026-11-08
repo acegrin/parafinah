@@ -21,9 +21,7 @@ from .player_admin import list_players, get_player_detail, get_event_economy_dat
 from .player_admin import delete_player
 from .control_center_admin import  control_center_sync
 from .event_resolution import (
-    get_pending_event_resolutions,
     process_batch_resolution,
-    process_event_resolution
 )
 
 urlpatterns = [
