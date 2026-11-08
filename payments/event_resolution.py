@@ -478,7 +478,7 @@ def process_event_resolution(request):
                     EventActivation.objects
                     .select_for_update()
                     .get(
-                        event_id=event_id,
+                        identification=event_id,
                         version=version
                     )
                 )
