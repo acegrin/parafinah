@@ -1,6 +1,5 @@
-# payments/event_resolution.py
-
 import hashlib
+import json
 import logging
 
 from django.db import transaction as db_transaction
@@ -12,10 +11,10 @@ from rest_framework import status
 from google.cloud import firestore
 
 from .models import (
-    EventEntry,
     EventActivation,
     EventResolutionParticipant,
     NotificationEntry,
+    PublishedSnapshot,
 )
 
 from .firebase_client import db
@@ -26,18 +25,33 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# REWARD CONFIGURATION
+# REWARD CONFIGURATION (SNAPSHOT-BASED)
 # ============================================================
 
-def get_event_gold_rewards(event):
+def get_event_gold_rewards_from_snapshot(event_id):
+    """
+    Retrieves gold rewards from the published event snapshot
+    instead of relying on legacy Django event entries.
+    """
+    try:
+        snapshot = PublishedSnapshot.objects.get(data_type="event")
+    except PublishedSnapshot.DoesNotExist:
+        return {1: 0, 2: 0, 3: 0}
 
-    rewards = event.rewards or {}
+    for record in snapshot.records:
+        data = record.get("data")
+        if not isinstance(data, dict):
+            continue
 
-    return {
-        1: int(rewards.get("first_place_gold", 0)),
-        2: int(rewards.get("second_place_gold", 0)),
-        3: int(rewards.get("third_place_gold", 0)),
-    }
+        if str(data.get("event_id")) == str(event_id):
+            rewards = data.get("rewards", {})
+            return {
+                1: int(rewards.get("first_place_gold", 0)),
+                2: int(rewards.get("second_place_gold", 0)),
+                3: int(rewards.get("third_place_gold", 0)),
+            }
+
+    return {1: 0, 2: 0, 3: 0}
 
 
 # ============================================================
@@ -45,7 +59,6 @@ def get_event_gold_rewards(event):
 # ============================================================
 
 def calculate_event_positions(results):
-
     """
     Competition ranking:
         1, 2, 2, 4
@@ -92,8 +105,6 @@ def submit_event_resolution(request):
     event_id = request.data.get("event_id")
     version = request.data.get("version")
     results = request.data.get("results")
-
-    print(f"Event ID: {event_id}, Version: {version}, Results: {results}")
 
     if not event_id or version is None or results is None:
         return Response(
@@ -147,14 +158,13 @@ def submit_event_resolution(request):
         with db_transaction.atomic():
 
             # --------------------------------------
-            # LOCK ACTIVATION AND EVENT
+            # LOCK ACTIVATION
             # --------------------------------------
 
             try:
                 activation = (
                     EventActivation.objects
                     .select_for_update()
-                    .select_related("event")
                     .get(
                         event_id=event_id,
                         version=version
@@ -176,19 +186,8 @@ def submit_event_resolution(request):
                     }
                 )
 
-            # --------------------------------------
-            # THE CONTROL CENTER DECIDES WHEN A RUN ENDED
-            # --------------------------------------
-            #
-            # The Control Center only submits after the event's
-            # end time has passed, and this endpoint is already
-            # authenticated with its key. Record the end here
-            # instead of waiting for a sync to say so.
-
             if activation.ended_at is None:
-
                 activation.ended_at = timezone.now()
-
                 activation.save(
                     update_fields=["ended_at"]
                 )
@@ -230,7 +229,7 @@ def submit_event_resolution(request):
                 })
 
             # --------------------------------------
-            # CALCULATE OFFICIAL POSITIONS
+            # CALCULATE OFFICIAL POSITIONS & REWARDS
             # --------------------------------------
 
             ranked = calculate_event_positions([
@@ -241,16 +240,12 @@ def submit_event_resolution(request):
                 for item in normalized_results
             ])
 
-            gold_rewards = get_event_gold_rewards(
-                activation.event
-            )
+            gold_rewards = get_event_gold_rewards_from_snapshot(event_id)
 
             participants = []
 
             for item in ranked:
-
                 position = item["position"]
-
                 participants.append(
                     EventResolutionParticipant(
                         activation=activation,
@@ -266,7 +261,6 @@ def submit_event_resolution(request):
             )
 
             activation.results_submitted_at = timezone.now()
-
             activation.save(
                 update_fields=["results_submitted_at"]
             )
@@ -278,18 +272,15 @@ def submit_event_resolution(request):
         })
 
     except (ValueError, TypeError) as error:
-
         return Response(
             {"error": str(error)},
             status=status.HTTP_400_BAD_REQUEST
         )
 
     except Exception:
-
         logger.exception(
             "Failed to submit event resolution."
         )
-
         return Response(
             {
                 "error": "Unable to submit event resolution."
@@ -303,24 +294,12 @@ def submit_event_resolution(request):
 # ============================================================
 
 class PlayerNotFound(ValueError):
-
     """
-    The player document does not exist (for example a deleted
-    account). There is nobody to pay, and retrying will never
-    change that, so it must not block the rest of the event.
+    The player document does not exist.
     """
 
 
 def issue_event_gold(participant):
-
-    """
-    Adds Gold and creates an issuance record in one
-    Firestore transaction.
-
-    If the request is retried, the existing issuance
-    record prevents Gold from being added again.
-    """
-
     if participant.gold_reward <= 0:
         return {
             "success": True,
@@ -355,7 +334,6 @@ def issue_event_gold(participant):
         )
 
         if existing.exists:
-
             return {
                 "success": True,
                 "already_issued": True,
@@ -372,11 +350,8 @@ def issue_event_gold(participant):
             )
 
         player_data = player_snapshot.to_dict() or {}
-
         current_gold = int(player_data.get("gold", 0))
-
         new_gold = current_gold + participant.gold_reward
-
         now = int(timezone.now().timestamp())
 
         transaction.update(
@@ -414,30 +389,15 @@ def issue_event_gold(participant):
 def create_event_result_notification(participant):
 
     activation = participant.activation
-
     title = "Event Results"
 
-    if participant.position == 1:
+    if participant.position in [1, 2, 3]:
+        suffix = {1: "1st", 2: "2nd", 3: "3rd"}[participant.position]
         description = (
-            f"You finished 1st with {participant.score} "
+            f"You finished {suffix} with {participant.score} "
             f"Legend points and earned "
             f"{participant.gold_reward} Gold!"
         )
-
-    elif participant.position == 2:
-        description = (
-            f"You finished 2nd with {participant.score} "
-            f"Legend points and earned "
-            f"{participant.gold_reward} Gold!"
-        )
-
-    elif participant.position == 3:
-        description = (
-            f"You finished 3rd with {participant.score} "
-            f"Legend points and earned "
-            f"{participant.gold_reward} Gold!"
-        )
-
     else:
         description = (
             f"You finished in position {participant.position} "
@@ -445,7 +405,6 @@ def create_event_result_notification(participant):
             f"Better luck next time!"
         )
 
-    # A stable hash helps identify the same result notification.
     hash_code = int(
         hashlib.sha256(
             (
@@ -480,7 +439,6 @@ def create_event_result_notification(participant):
         )
 
         locked.notification_sent = True
-
         locked.save(
             update_fields=["notification_sent"]
         )
@@ -510,11 +468,7 @@ def process_event_resolution(request):
     try:
 
         version = int(version)
-
-        batch_size = int(
-            request.data.get("batch_size", 25)
-        )
-
+        batch_size = int(request.data.get("batch_size", 25))
         batch_size = max(1, min(batch_size, 100))
 
         with db_transaction.atomic():
@@ -523,7 +477,6 @@ def process_event_resolution(request):
                 activation = (
                     EventActivation.objects
                     .select_for_update()
-                    .select_related("event")
                     .get(
                         event_id=event_id,
                         version=version
@@ -547,23 +500,15 @@ def process_event_resolution(request):
             if activation.results_submitted_at is None:
                 return Response(
                     {
-                        "error": (
-                            "Results have not been submitted yet."
-                        )
+                        "error": "Results have not been submitted yet."
                     },
                     status=status.HTTP_409_CONFLICT
                 )
 
-        # ------------------------------------------
-        # PROCESS REWARDS AND NOTIFICATIONS
-        # ------------------------------------------
-
         pending = list(
             EventResolutionParticipant.objects
             .filter(
-                activation=activation
-            )
-            .filter(
+                activation=activation,
                 reward_issued=False
             )
             .order_by("position", "user_id")[:batch_size]
@@ -572,17 +517,9 @@ def process_event_resolution(request):
         processed = 0
 
         for participant in pending:
-
-            # Gold is independently idempotent in Firestore.
-            # Any other failure (network, Firestore outage) is raised
-            # so the whole call can be retried safely.
             try:
                 issue_event_gold(participant)
-
             except PlayerNotFound:
-
-                # Nobody to pay; do not let one missing account
-                # block every other player in the event.
                 logger.warning(
                     "Skipping Gold for missing player %s "
                     "(event %s, version %s, %s Gold).",
@@ -599,14 +536,9 @@ def process_event_resolution(request):
             )
 
             participant.reward_issued = True
-
-            # Notification is independently idempotent in Django.
             create_event_result_notification(participant)
-
             processed += 1
 
-        # Also catch participants whose Gold was issued
-        # but whose notification still needs to be created.
         notification_pending = list(
             EventResolutionParticipant.objects
             .filter(
@@ -618,16 +550,10 @@ def process_event_resolution(request):
         )
 
         for participant in notification_pending:
-
             create_event_result_notification(participant)
 
-        # ------------------------------------------
-        # CHECK COMPLETION
-        # ------------------------------------------
-
         unfinished = EventResolutionParticipant.objects.filter(
-            activation=activation
-        ).filter(
+            activation=activation,
             reward_issued=False
         ).exists()
 
@@ -643,38 +569,14 @@ def process_event_resolution(request):
                 activation = (
                     EventActivation.objects
                     .select_for_update()
-                    .select_related("event")
                     .get(pk=activation.pk)
                 )
 
                 if activation.resolved_at is None:
-
                     activation.resolved_at = timezone.now()
-
                     activation.save(
                         update_fields=["resolved_at"]
                     )
-
-                    event = EventEntry.objects.select_for_update().get(
-                        event_id=activation.event_id
-                    )
-
-                    if event.current_version == activation.version:
-
-                        event.status = "RESOLVED"
-                        event.is_active = False
-                        event.resolved_at = activation.resolved_at
-
-                        from .event_admin import (
-                            generate_event_hash,
-                            bump_event_manifest
-                        )
-
-                        event.hash_code = generate_event_hash(event)
-
-                        event.save()
-
-                        bump_event_manifest()
 
             return Response({
                 "success": True,
@@ -684,8 +586,7 @@ def process_event_resolution(request):
             })
 
         remaining = EventResolutionParticipant.objects.filter(
-            activation=activation
-        ).filter(
+            activation=activation,
             reward_issued=False
         ).count()
 
@@ -704,24 +605,19 @@ def process_event_resolution(request):
         })
 
     except Exception:
-
         logger.exception(
             "Failed to process event resolution."
         )
-
         return Response(
             {
-                "error": (
-                    "Event resolution processing failed. "
-                    "It can safely be retried."
-                )
+                "error": "Event resolution processing failed. It can safely be retried."
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
 
 # ============================================================
-# FIND COMPLETED ACTIVATIONS
+# FIND PENDING ACTIVATIONS
 # ============================================================
 
 @api_view(["GET"])
@@ -733,24 +629,35 @@ def get_pending_event_resolutions(request):
         return response
 
     try:
-
         activations = (
             EventActivation.objects
             .filter(
                 ended_at__isnull=False,
                 resolved_at__isnull=True
             )
-            .select_related("event")
             .order_by("ended_at")
         )
+
+        # Pull event titles from the latest PublishedSnapshot
+        try:
+            snapshot = PublishedSnapshot.objects.get(data_type="event")
+            event_titles = {
+                str(record.get("data", {}).get("event_id")): record.get("data", {}).get("title", "Unknown Event")
+                for record in snapshot.records
+                if isinstance(record.get("data"), dict)
+            }
+        except PublishedSnapshot.DoesNotExist:
+            event_titles = {}
 
         pending = []
 
         for activation in activations:
+            event_id_str = str(activation.event_id)
+            title = event_titles.get(event_id_str, "Unknown Event")
 
             pending.append({
-                "event_id": str(activation.event_id),
-                "event_title": activation.event.title,
+                "event_id": event_id_str,
+                "event_title": title,
                 "version": activation.version,
                 "ended_at": activation.ended_at.isoformat(),
                 "results_submitted": (
@@ -765,16 +672,12 @@ def get_pending_event_resolutions(request):
         })
 
     except Exception:
-
         logger.exception(
             "Failed to retrieve pending event resolutions."
         )
-
         return Response(
             {
-                "error": (
-                    "Unable to retrieve pending event resolutions."
-                )
+                "error": "Unable to retrieve pending event resolutions."
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
