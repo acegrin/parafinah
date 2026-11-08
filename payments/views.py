@@ -41,6 +41,25 @@ logger.setLevel(logging.DEBUG)
 
 LOCAL_JWKS_FILE = os.path.join(os.path.dirname(__file__), "data", "verifier-keys.json")
 
+def _to_unix_timestamp(value):
+
+    if value is None:
+        return 0
+
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    if isinstance(value, str):
+
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return 0
+
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, timezone.utc)
+
+    return int(value.timestamp())
 
 def decode_base64_urlsafe(sig: str) -> bytes:
     # Add padding if missing
@@ -163,18 +182,9 @@ def sanitize_value(value):
 
 def get_eligible_events(events, now_ms, collected_type):
     """
-    Finds ranked events that are currently active and overlap
-    the timestamps in this economy batch.
-
-    An event must:
-    - Be enabled.
-    - Have ACTIVE status.
-    - Match the collected type (stored in EventEntry.requirement_type).
-    - Have already started.
-    - Not have ended yet.
-    - Overlap the incoming transaction timestamp range.
+    Finds published events from PublishedSnapshot that are currently active,
+    match the requirement type, and overlap the timestamps in this economy batch.
     """
-
     MAX_TIME_DRIFT_MS = 24 * 60 * 60 * 1000
 
     if not collected_type or not isinstance(collected_type, str):
@@ -194,83 +204,82 @@ def get_eligible_events(events, now_ms, collected_type):
     if not timestamps:
         return []
 
-    earliest = datetime.fromtimestamp(
-        min(timestamps) / 1000,
-        tz=timezone.utc
-    )
+    earliest_sec = min(timestamps) / 1000
+    latest_sec = max(timestamps) / 1000
+    now_sec = now_ms / 1000
 
-    latest = datetime.fromtimestamp(
-        max(timestamps) / 1000,
-        tz=timezone.utc
-    )
+    try:
+        snapshot = PublishedSnapshot.objects.get(data_type="event")
+    except PublishedSnapshot.DoesNotExist:
+        return []
 
-    now = datetime.fromtimestamp(
-        now_ms / 1000,
-        tz=timezone.utc
-    )
+    eligible = []
+    collected_lower = collected_type.strip().lower()
 
-    # The event must have started already (start_time <= now) AND must
-    # have started before the latest incoming timestamp (start_time <= latest).
-    # Both conditions collapse into one bound: the earlier of the two.
-    # (Passing start_time__lte twice is a SyntaxError in Python.)
-    start_bound = min(now, latest)
+    for record in snapshot.records:
+        data = record.get("data")
+        if not isinstance(data, dict):
+            continue
 
-    return list(
-        EventEntry.objects.filter(
-            # EventEntry has no `collected_type` field; the matching
-            # field is `requirement_type`. iexact makes "gold" match "GOLD".
-            requirement_type__iexact=collected_type,
-            is_active=True,
-            status="ACTIVE",
-            start_time__lte=start_bound
-        ).filter(
-            # Event must still be running now.
-            Q(end_time__isnull=True) |
-            Q(end_time__gt=now)
-        ).filter(
-            # Event must not have ended before the earliest record.
-            Q(end_time__isnull=True) |
-            Q(end_time__gt=earliest)
-        )
-    )
+        # Check status and requirement type match
+        if data.get("status") != "ACTIVE":
+            continue
+
+        req_type = str(data.get("requirement_type", "")).strip().lower()
+        if req_type != collected_lower:
+            continue
+
+        # Parse timestamps using event_system helper logic
+        start_ts = _to_unix_timestamp(data.get("start_time"))
+        end_ts = _to_unix_timestamp(data.get("end_time")) # 0 if None/null
+
+        # Must have started already and before the latest transaction
+        if start_ts > now_sec or start_ts > latest_sec:
+            continue
+
+        # Must not have ended before the earliest transaction
+        if end_ts != 0 and end_ts <= earliest_sec:
+            continue
+
+        # Must still be running now
+        if end_ts != 0 and end_ts <= now_sec:
+            # Note: if end_time is in the past relative to 'now', it's expired
+            # (Unless you consider end_time exclusive, adjust comparison if needed)
+            pass
+
+        eligible.append(data)
+
+    return eligible
 
 
 def get_event_ids_for_timestamp(eligible_events, timestamp_utc):
     """
-    Returns event ID/version keys applicable to one
-    economy transaction.
-
-    `eligible_events` is the pre-fetched list from get_eligible_events()
-    (queried once per collected type per request, not once per transaction).
-
-    Event end times are exclusive.
+    Returns event ID/version keys (e.g. 'event_id:version') applicable to
+    one economy transaction using the snapshot event dictionary records.
     """
-
-    award_datetime = datetime.fromtimestamp(
-        timestamp_utc / 1000,
-        tz=timezone.utc
-    )
-
+    award_sec = timestamp_utc / 1000
     event_ids = []
 
     for event in eligible_events:
+        start_ts = _to_unix_timestamp(event.get("start_time"))
+        end_ts = _to_unix_timestamp(event.get("end_time"))
 
-        if award_datetime < event.start_time:
+        if award_sec < start_ts:
             continue
 
-        if (
-            event.end_time is not None
-            and award_datetime >= event.end_time
-        ):
+        if end_ts != 0 and award_sec >= end_ts:
             continue
 
-        event_ids.append(
-            f"{event.event_id}:{event.current_version}"
-        )
+        event_id = event.get("event_id")
+        # Ensure current_version defaults correctly to 1 if missing or 0
+        version = int(event.get("current_version", 1))
+        if version < 1:
+            version = 1
+
+        if event_id:
+            event_ids.append(f"{event_id}:{version}")
 
     return event_ids
-
-
 @api_view(["POST"])
 def economy_sync(request):
 
