@@ -169,38 +169,22 @@ def create_event_result_notification(
             f"Better luck next time!"
         )
 
-    # Deterministic notification ID.
-    hash_code = int(
-        hashlib.sha256(
-            (
-                f"event-result:"
-                f"{event_id}:"
-                f"{version}:"
-                f"{user_id}"
-            ).encode()
-        ).hexdigest(),
-        16
-    ) % (10 ** 18)
-
-    # Use get_or_create with matching defaults
-    notification, created = (
-        NotificationEntry.objects.get_or_create(
+    # Use the model's built-in helper method which handles creation,
+    # default branding/image assets, and duplicate checks.
+    try:
+        NotificationEntry.create_from_image_url(
             user_id=user_id,
-            hash_code=hash_code,
-            defaults={
-                "title": title,
-                "description": description,
-                "seen": False,
-                # Include image_url if your NotificationEntry model requires it
-                "image_url": (
-                    "https://parafinah.pythonanywhere.com/"
-                    "media/unordered/NotificationIconBlackNWhite.png"
-                )
-            }
+            title=title,
+            description=description,
+            image_url=(
+                "https://parafinah.pythonanywhere.com/"
+                "media/unordered/NotificationIconBlackNWhite.png"
+            )
         )
-    )
-
-    return created
+        return True
+    except Exception:
+        logger.exception("Failed to create event result notification for user %s", user_id)
+        return False
 
 # ============================================================
 # VALIDATION HELPERS
