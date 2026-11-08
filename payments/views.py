@@ -19,7 +19,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from datetime import timezone, datetime
 import dateutil.parser  # pip install python-dateutil
 from dateutil.parser import parse
-from payments.models import LeaderboardEntry, LevelConfig, NotificationEntry, RunnerEntry, PackageEntry, EventEntry, EventParticipation, Mission
+from payments.models import LeaderboardEntry, LevelConfig, NotificationEntry, RunnerEntry, PackageEntry, EventEntry, \
+    EventParticipation, Mission, PublishedSnapshot
 from .mission_system import get_mission_article, get_mission_manifest
 from .news_system import get_news_manifest, get_news_article
 from .notification_system import get_notification_manifest, get_notification_article
