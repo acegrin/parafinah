@@ -380,7 +380,7 @@ class EventActivation(models.Model):
         related_name="activations"
     )
 
-    id = models.CharField(
+    identification = models.CharField(
         max_length=64, default="123"
     )
 
