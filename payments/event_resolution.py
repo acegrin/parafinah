@@ -1,22 +1,16 @@
+
 import hashlib
-import json
 import logging
 
-from django.db import transaction as db_transaction
 from django.utils import timezone
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
 from google.cloud import firestore
 
-from .models import (
-    EventActivation,
-    EventResolutionParticipant,
-    NotificationEntry,
-    PublishedSnapshot,
-)
-
+from .models import NotificationEntry
 from .firebase_client import db
 from .event_admin import control_center_authenticated
 
@@ -25,521 +19,32 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================
-# REWARD CONFIGURATION (SNAPSHOT-BASED)
+# EXCEPTIONS
 # ============================================================
 
-def get_event_gold_rewards_from_snapshot(event_id):
-    """
-    Retrieves gold rewards from the published event snapshot
-    instead of relying on legacy Django event entries.
-    """
-    try:
-        snapshot = PublishedSnapshot.objects.get(data_type="event")
-    except PublishedSnapshot.DoesNotExist:
-        return {1: 0, 2: 0, 3: 0}
-
-    for record in snapshot.records:
-        data = record.get("data")
-        if not isinstance(data, dict):
-            continue
-
-        if str(data.get("event_id")) == str(event_id):
-            rewards = data.get("rewards", {})
-            return {
-                1: int(rewards.get("first_place_gold", 0)),
-                2: int(rewards.get("second_place_gold", 0)),
-                3: int(rewards.get("third_place_gold", 0)),
-            }
-
-    return {1: 0, 2: 0, 3: 0}
-
-
-# ============================================================
-# RANKING
-# ============================================================
-
-def calculate_event_positions(results):
-    """
-    Competition ranking:
-        1, 2, 2, 4
-
-    Every participant with an equal score receives
-    the same position.
-    """
-
-    ordered = sorted(
-        results,
-        key=lambda item: item["score"],
-        reverse=True
-    )
-
-    previous_score = None
-    current_position = 0
-
-    for index, participant in enumerate(ordered):
-
-        score = participant["score"]
-
-        if previous_score is None or score != previous_score:
-            current_position = index + 1
-
-        participant["position"] = current_position
-
-        previous_score = score
-
-    return ordered
-
-
-# ============================================================
-# PROCESS PREPARED RESOLUTION BATCH
-# ============================================================
-
-@api_view(["POST"])
-def process_batch_resolution(request):
-    authenticated, response = control_center_authenticated(request)
-
-    if not authenticated:
-        return response
-
-    event_id = request.data.get("event_id")
-    version = request.data.get("version")
-
-    batch_number = request.data.get("batch_number")
-    total_batches = request.data.get("total_batches")
-    total_participants = request.data.get("total_participants")
-
-    participants_data = request.data.get("participants")
-
-    if (
-            not event_id
-            or version is None
-            or batch_number is None
-            or total_batches is None
-            or total_participants is None
-            or participants_data is None
-    ):
-        return Response(
-            {
-                "error": "Missing required batch fields."
-            },
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    try:
-
-        # --------------------------------------------------
-        # VALIDATE BATCH METADATA
-        # --------------------------------------------------
-
-        version = int(version)
-        batch_number = int(batch_number)
-        total_batches = int(total_batches)
-        total_participants = int(total_participants)
-
-        if version < 1:
-            raise ValueError("Invalid activation version.")
-
-        if total_batches < 1:
-            raise ValueError("Invalid total_batches.")
-
-        if batch_number < 1 or batch_number > total_batches:
-            raise ValueError("Invalid batch_number.")
-
-        if total_participants < 1:
-            raise ValueError("Invalid total_participants.")
-
-        if not isinstance(participants_data, list):
-            raise ValueError("Participants must be a list.")
-
-        if not participants_data:
-            raise ValueError("Batch cannot be empty.")
-
-        if len(participants_data) > 100:
-            raise ValueError("Batch exceeds maximum size.")
-
-        # --------------------------------------------------
-        # VALIDATE PARTICIPANTS
-        # --------------------------------------------------
-
-        normalized_participants = []
-        seen_users = set()
-
-        for item in participants_data:
-
-            if not isinstance(item, dict):
-                raise ValueError("Invalid participant.")
-
-            user_id = str(
-                item.get("userId", "")
-            ).strip()
-
-            if not user_id:
-                raise ValueError(
-                    "A participant is missing userId."
-                )
-
-            if user_id in seen_users:
-                raise ValueError(
-                    f"Duplicate participant: {user_id}"
-                )
-
-            seen_users.add(user_id)
-
-            score = item.get("score")
-            position = item.get("position")
-            gold_reward = item.get("gold_reward")
-
-            # bool is a subclass of int in Python, so
-            # explicitly reject it.
-            if isinstance(score, bool):
-                raise ValueError("Invalid participant score.")
-
-            if isinstance(position, bool):
-                raise ValueError("Invalid participant position.")
-
-            if isinstance(gold_reward, bool):
-                raise ValueError("Invalid Gold reward.")
-
-            score = int(score)
-            position = int(position)
-            gold_reward = int(gold_reward)
-
-            if score < 0:
-                raise ValueError("Score cannot be negative.")
-
-            if position < 1:
-                raise ValueError("Position must be positive.")
-
-            if gold_reward < 0:
-                raise ValueError("Gold reward cannot be negative.")
-
-            normalized_participants.append({
-                "user_id": user_id,
-                "score": score,
-                "position": position,
-                "gold_reward": gold_reward
-            })
-
-        if len(normalized_participants) > total_participants:
-            raise ValueError(
-                "Batch contains more participants than the resolution."
-            )
-
-        # --------------------------------------------------
-        # VALIDATE OFFICIAL REWARD CONFIGURATION
-        # --------------------------------------------------
-
-        gold_rewards = get_event_gold_rewards_from_snapshot(
-            event_id
-        )
-
-        for item in normalized_participants:
-
-            expected_reward = gold_rewards.get(
-                item["position"],
-                0
-            )
-
-            if item["gold_reward"] != expected_reward:
-                return Response(
-                    {
-                        "error": (
-                            f"Invalid Gold reward for "
-                            f"participant {item['user_id']}."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        # --------------------------------------------------
-        # GET ACTIVATION AND PERSIST PARTICIPANTS
-        # --------------------------------------------------
-
-        with db_transaction.atomic():
-
-            try:
-                activation = (
-                    EventActivation.objects
-                    .select_for_update()
-                    .get(
-                        identification=event_id,
-                        version=version
-                    )
-                )
-
-            except EventActivation.DoesNotExist:
-                return Response(
-                    {
-                        "error": "Event activation not found."
-                    },
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            # A repeated request after full completion is safe.
-            if activation.resolved_at is not None:
-                return Response({
-                    "success": True,
-                    "batch_complete": True,
-                    "already_resolved": True
-                })
-
-            # Preserve the existing behavior of recording the
-            # activation end time when resolution first begins.
-            if activation.ended_at is None:
-                activation.ended_at = timezone.now()
-                activation.save(
-                    update_fields=["ended_at"]
-                )
-
-            # Save or verify each participant.
-            #
-            # Existing participants must match exactly.
-            # A retry cannot change a previously prepared result.
-
-            for item in normalized_participants:
-
-                participant, created = (
-                    EventResolutionParticipant.objects.get_or_create(
-                        activation=activation,
-                        user_id=item["user_id"],
-                        defaults={
-                            "score": item["score"],
-                            "position": item["position"],
-                            "gold_reward": item["gold_reward"]
-                        }
-                    )
-                )
-
-                if not created:
-
-                    if (
-                            participant.score != item["score"]
-                            or participant.position != item["position"]
-                            or participant.gold_reward != item["gold_reward"]
-                    ):
-                        return Response(
-                            {
-                                "error": (
-                                    "A participant's submitted result "
-                                    "does not match the previously saved result."
-                                ),
-                                "userId": item["user_id"]
-                            },
-                            status=status.HTTP_409_CONFLICT
-                        )
-
-        # --------------------------------------------------
-        # PROCESS REWARDS
-        # --------------------------------------------------
-
-        paid = 0
-        already_paid = 0
-        skipped_missing_player = 0
-        no_reward = 0
-        notifications_created = 0
-
-        participant_ids = [
-            item["user_id"]
-            for item in normalized_participants
-        ]
-
-        participants = list(
-            EventResolutionParticipant.objects.filter(
-                activation=activation,
-                user_id__in=participant_ids
-            ).order_by("position", "user_id")
-        )
-
-        for participant in participants:
-
-            # ----------------------------------------------
-            # ISSUE GOLD
-            # ----------------------------------------------
-
-            if not participant.reward_issued:
-
-                if participant.gold_reward <= 0:
-
-                    no_reward += 1
-
-                else:
-
-                    try:
-
-                        result = issue_event_gold(participant)
-
-                        if result["already_issued"]:
-                            already_paid += 1
-                        else:
-                            paid += 1
-
-                    except PlayerNotFound:
-
-                        # Preserve the previous behavior:
-                        # a deleted/missing player is skipped,
-                        # rather than blocking resolution forever.
-
-                        skipped_missing_player += 1
-
-                        logger.warning(
-                            "Skipping Gold for missing player %s "
-                            "(event %s, version %s, reward %s).",
-                            participant.user_id,
-                            event_id,
-                            version,
-                            participant.gold_reward
-                        )
-
-                EventResolutionParticipant.objects.filter(
-                    pk=participant.pk
-                ).update(
-                    reward_issued=True
-                )
-
-                participant.reward_issued = True
-
-            # ----------------------------------------------
-            # CREATE RESULT NOTIFICATION
-            # ----------------------------------------------
-
-            if not participant.notification_sent:
-                create_event_result_notification(participant)
-
-                participant.notification_sent = True
-                notifications_created += 1
-
-        # --------------------------------------------------
-        # VERIFY THIS BATCH
-        # --------------------------------------------------
-
-        batch_participants = list(
-            EventResolutionParticipant.objects.filter(
-                activation=activation,
-                user_id__in=participant_ids
-            )
-        )
-
-        batch_complete = all(
-            participant.reward_issued
-            and participant.notification_sent
-            for participant in batch_participants
-        )
-
-        if not batch_complete:
-            return Response(
-                {
-                    "success": True,
-                    "batch_complete": False,
-                    "message": "Batch still has unfinished participants."
-                }
-            )
-
-        # --------------------------------------------------
-        # FINALIZE ACTIVATION WHEN ALL PARTICIPANTS ARRIVE
-        # --------------------------------------------------
-
-        all_participants = EventResolutionParticipant.objects.filter(
-            activation=activation
-        )
-
-        participant_count = all_participants.count()
-
-        unfinished = all_participants.filter(
-            reward_issued=False
-        ).exists() or all_participants.filter(
-            notification_sent=False
-        ).exists()
-
-        # The client sends total_participants with every batch.
-        # This prevents an early batch from finalizing the
-        # activation before all prepared participants arrive.
-        if (
-                participant_count == total_participants
-                and not unfinished
-        ):
-
-            with db_transaction.atomic():
-
-                locked_activation = (
-                    EventActivation.objects
-                    .select_for_update()
-                    .get(pk=activation.pk)
-                )
-
-                if locked_activation.resolved_at is None:
-                    locked_activation.resolved_at = timezone.now()
-                    locked_activation.save(
-                        update_fields=["resolved_at"]
-                    )
-
-        return Response({
-            "success": True,
-            "batch_complete": True,
-            "paid": paid,
-            "already_paid": already_paid,
-            "skipped_missing_player": skipped_missing_player,
-            "no_reward": no_reward,
-            "notifications_created": notifications_created,
-            "participant_count": len(participants),
-            "activation_resolved": (
-                    participant_count == total_participants
-                    and not unfinished
-            ),
-            "message": "Resolution batch processed successfully."
-        })
-
-    except (ValueError, TypeError) as error:
-
-        return Response(
-            {"error": str(error)},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    except Exception:
-
-        logger.exception(
-            "Failed to process event resolution batch."
-        )
-
-        return Response(
-            {
-                "error": (
-                    "Resolution batch processing failed. "
-                    "The same batch can safely be retried."
-                )
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-# ============================================================
-# IDEMPOTENT FIRESTORE GOLD ISSUANCE
-# ============================================================
-
-class PlayerNotFound(ValueError):
+class PlayerNotFound(Exception):
     pass
 
 
-def issue_event_gold(participant):
-    if participant.gold_reward <= 0:
+# ============================================================
+# FIRESTORE GOLD REWARD
+# ============================================================
+
+def issue_event_gold(user_id, event_id, version, gold_reward):
+
+    if gold_reward <= 0:
         return {
-            "success": True,
             "already_issued": False,
             "gold_added": 0
         }
 
-    activation = participant.activation
-
-    event_id = str(activation.event_id)
-    version = int(activation.version)
-
-    # Stable ID for this player's reward for this event version.
     transaction_id = (
         f"event_reward_{event_id}_{version}"
     )
 
     player_ref = (
         db.collection("playerData")
-        .document(participant.user_id)
+        .document(user_id)
     )
 
     economy_ref = (
@@ -553,26 +58,25 @@ def issue_event_gold(participant):
     @firestore.transactional
     def apply_reward(transaction):
 
-        # Read the economy receipt first.
+        # Check whether this reward was already issued.
         existing = economy_ref.get(
             transaction=transaction
         )
 
         if existing.exists:
             return {
-                "success": True,
                 "already_issued": True,
                 "gold_added": 0
             }
 
-        # Read the current player balance.
+        # Retrieve the player's current balance.
         player_snapshot = player_ref.get(
             transaction=transaction
         )
 
         if not player_snapshot.exists:
             raise PlayerNotFound(
-                f"Player not found: {participant.user_id}"
+                f"Player not found: {user_id}"
             )
 
         player_data = player_snapshot.to_dict() or {}
@@ -581,25 +85,23 @@ def issue_event_gold(participant):
             player_data.get("gold", 0)
         )
 
-        reward = int(participant.gold_reward)
-        new_gold = current_gold + reward
+        new_gold = current_gold + gold_reward
 
         now = int(timezone.now().timestamp())
         timestamp_ms = now * 1000
 
-        # This is the same economy_events structure used
-        # by the existing economy system.
+        # Economy record.
         economy_record = {
             "runId": transaction_id,
             "type": "event_reward",
             "collectedType": "gold",
-            "delta": reward,
+            "delta": gold_reward,
             "timestampUtc": timestamp_ms,
             "sourceId": event_id,
             "context": f"event_reward:{version}",
 
-            # Event rewards must not count as player activity
-            # when calculating event participation scores.
+            # Event rewards must not count as player
+            # activity when calculating event scores.
             "eventIds": [],
 
             "clientVersion": "control_center",
@@ -607,7 +109,8 @@ def issue_event_gold(participant):
             "serverTimestamp": now
         }
 
-        # Both writes belong to the same transaction.
+        # Update the balance and create the receipt
+        # atomically.
         transaction.update(
             player_ref,
             {
@@ -622,61 +125,68 @@ def issue_event_gold(participant):
         )
 
         return {
-            "success": True,
             "already_issued": False,
-            "gold_added": reward
+            "gold_added": gold_reward
         }
 
     return apply_reward(firestore_transaction)
+
 
 # ============================================================
 # RESULT NOTIFICATION
 # ============================================================
 
-def create_event_result_notification(participant):
+def create_event_result_notification(
+    user_id,
+    event_id,
+    version,
+    score,
+    position,
+    gold_reward
+):
 
-    activation = participant.activation
     title = "Event Results"
 
-    if participant.position in [1, 2, 3]:
-        suffix = {1: "1st", 2: "2nd", 3: "3rd"}[participant.position]
+    if position in [1, 2, 3]:
+
+        suffix = {
+            1: "1st",
+            2: "2nd",
+            3: "3rd"
+        }[position]
+
         description = (
-            f"You finished {suffix} with {participant.score} "
+            f"You finished {suffix} with {score} "
             f"Legend points and earned "
-            f"{participant.gold_reward} Gold!"
+            f"{gold_reward} Gold!"
         )
+
     else:
+
         description = (
-            f"You finished in position {participant.position} "
-            f"with {participant.score} Legend points. "
+            f"You finished in position {position} "
+            f"with {score} Legend points. "
             f"Better luck next time!"
         )
 
+    # Deterministic notification ID.
     hash_code = int(
         hashlib.sha256(
             (
                 f"event-result:"
-                f"{activation.event_id}:"
-                f"{activation.version}:"
-                f"{participant.user_id}"
+                f"{event_id}:"
+                f"{version}:"
+                f"{user_id}"
             ).encode()
         ).hexdigest(),
         16
     ) % (10 ** 18)
 
-    with db_transaction.atomic():
-
-        locked = (
-            EventResolutionParticipant.objects
-            .select_for_update()
-            .get(pk=participant.pk)
-        )
-
-        if locked.notification_sent:
-            return
-
+    # get_or_create prevents duplicate notifications
+    # when the same batch is submitted again.
+    notification, created = (
         NotificationEntry.objects.get_or_create(
-            user_id=locked.user_id,
+            user_id=user_id,
             hash_code=hash_code,
             defaults={
                 "title": title,
@@ -684,247 +194,313 @@ def create_event_result_notification(participant):
                 "seen": False
             }
         )
+    )
 
-        locked.notification_sent = True
-        locked.save(
-            update_fields=["notification_sent"]
-        )
+    return created
 
 
 # ============================================================
-# PROCESS PENDING PARTICIPANTS
+# VALIDATION HELPERS
+# ============================================================
+
+def validate_integer(value, field_name, minimum=None):
+
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {field_name}.")
+
+    try:
+        converted = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid {field_name}.")
+
+    # Reject fractional numeric values.
+    if isinstance(value, float) and value != converted:
+        raise ValueError(f"Invalid {field_name}.")
+
+    if minimum is not None and converted < minimum:
+        raise ValueError(
+            f"{field_name} must be at least {minimum}."
+        )
+
+    return converted
+
+
+def validate_batch(request_data):
+
+    event_id = str(
+        request_data.get("event_id", "")
+    ).strip()
+
+    if not event_id:
+        raise ValueError("Missing event_id.")
+
+    version = validate_integer(
+        request_data.get("version"),
+        "version",
+        minimum=1
+    )
+
+    batch_number = validate_integer(
+        request_data.get("batch_number"),
+        "batch_number",
+        minimum=1
+    )
+
+    total_batches = validate_integer(
+        request_data.get("total_batches"),
+        "total_batches",
+        minimum=1
+    )
+
+    total_participants = validate_integer(
+        request_data.get("total_participants"),
+        "total_participants",
+        minimum=1
+    )
+
+    if batch_number > total_batches:
+        raise ValueError("Invalid batch_number.")
+
+    participants = request_data.get("participants")
+
+    if not isinstance(participants, list) or not participants:
+        raise ValueError("Batch must contain participants.")
+
+    if len(participants) > 100:
+        raise ValueError("Batch exceeds maximum size.")
+
+    normalized = []
+    seen_users = set()
+
+    for item in participants:
+
+        if not isinstance(item, dict):
+            raise ValueError("Invalid participant data.")
+
+        user_id = str(
+            item.get("userId", "")
+        ).strip()
+
+        if not user_id:
+            raise ValueError(
+                "A participant is missing userId."
+            )
+
+        if user_id in seen_users:
+            raise ValueError(
+                f"Duplicate participant: {user_id}"
+            )
+
+        seen_users.add(user_id)
+
+        score = validate_integer(
+            item.get("score"),
+            "score",
+            minimum=0
+        )
+
+        position = validate_integer(
+            item.get("position"),
+            "position",
+            minimum=1
+        )
+
+        gold_reward = validate_integer(
+            item.get("gold_reward"),
+            "gold_reward",
+            minimum=0
+        )
+
+        normalized.append({
+            "user_id": user_id,
+            "score": score,
+            "position": position,
+            "gold_reward": gold_reward
+        })
+
+    if len(normalized) > total_participants:
+        raise ValueError(
+            "Batch contains more participants than declared."
+        )
+
+    return {
+        "event_id": event_id,
+        "version": version,
+        "batch_number": batch_number,
+        "total_batches": total_batches,
+        "total_participants": total_participants,
+        "participants": normalized
+    }
+
+
+# ============================================================
+# PROCESS PREPARED BATCH
 # ============================================================
 
 @api_view(["POST"])
-def process_event_resolution(request):
+def process_batch_resolution(request):
 
-    authenticated, response = control_center_authenticated(request)
+    authenticated, response = control_center_authenticated(
+        request
+    )
 
     if not authenticated:
         return response
 
-    event_id = request.data.get("event_id")
-    version = request.data.get("version")
+    try:
 
-    if not event_id or version is None:
+        # ----------------------------------------------------
+        # VALIDATE REQUEST
+        # ----------------------------------------------------
+
+        batch = validate_batch(request.data)
+
+        event_id = batch["event_id"]
+        version = batch["version"]
+        batch_number = batch["batch_number"]
+        participants = batch["participants"]
+
+        # ----------------------------------------------------
+        # PROCESS PARTICIPANTS
+        # ----------------------------------------------------
+
+        paid = 0
+        already_paid = 0
+        no_reward = 0
+        notifications_created = 0
+        notifications_existing = 0
+
+        for participant in participants:
+
+            user_id = participant["user_id"]
+            score = participant["score"]
+            position = participant["position"]
+            gold_reward = participant["gold_reward"]
+
+            # ----------------------------------------------
+            # ISSUE GOLD
+            # ----------------------------------------------
+
+            result = issue_event_gold(
+                user_id=user_id,
+                event_id=event_id,
+                version=version,
+                gold_reward=gold_reward
+            )
+
+            if gold_reward <= 0:
+                no_reward += 1
+
+            elif result["already_issued"]:
+                already_paid += 1
+
+            else:
+                paid += 1
+
+            # ----------------------------------------------
+            # CREATE NOTIFICATION
+            # ----------------------------------------------
+
+            notification_created = (
+                create_event_result_notification(
+                    user_id=user_id,
+                    event_id=event_id,
+                    version=version,
+                    score=score,
+                    position=position,
+                    gold_reward=gold_reward
+                )
+            )
+
+            if notification_created:
+                notifications_created += 1
+            else:
+                notifications_existing += 1
+
+        # ----------------------------------------------------
+        # SUCCESS
+        # ----------------------------------------------------
+
+        logger.info(
+            "Event batch processed successfully. "
+            "Event=%s Version=%s Batch=%s Participants=%s",
+            event_id,
+            version,
+            batch_number,
+            len(participants)
+        )
+
         return Response(
-            {"error": "Missing event_id or version."},
+            {
+                "success": True,
+                "batch_complete": True,
+                "event_id": event_id,
+                "version": version,
+                "batch_number": batch_number,
+                "participant_count": len(participants),
+                "paid": paid,
+                "already_paid": already_paid,
+                "no_reward": no_reward,
+                "notifications_created": notifications_created,
+                "notifications_existing": notifications_existing,
+                "message": (
+                    f"Batch {batch_number} processed successfully."
+                )
+            },
+            status=status.HTTP_200_OK
+        )
+
+    except (ValueError, TypeError) as error:
+
+        logger.warning(
+            "Invalid event resolution batch: %s",
+            str(error)
+        )
+
+        return Response(
+            {
+                "success": False,
+                "batch_complete": False,
+                "error": str(error),
+                "message": "The batch contains invalid data."
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    try:
+    except PlayerNotFound as error:
 
-        version = int(version)
-        batch_size = int(request.data.get("batch_size", 25))
-        batch_size = max(1, min(batch_size, 100))
-
-        with db_transaction.atomic():
-
-            try:
-                activation = (
-                    EventActivation.objects
-                    .select_for_update()
-                    .get(
-                        identification=event_id,
-                        version=version
-                    )
-                )
-
-            except EventActivation.DoesNotExist:
-                return Response(
-                    {"error": "Event activation not found."},
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            if activation.resolved_at is not None:
-                return Response({
-                    "success": True,
-                    "complete": True,
-                    "already_resolved": True,
-                    "message": "Activation is already resolved."
-                })
-
-            if activation.results_submitted_at is None:
-                return Response(
-                    {
-                        "error": "Results have not been submitted yet."
-                    },
-                    status=status.HTTP_409_CONFLICT
-                )
-
-        pending = list(
-            EventResolutionParticipant.objects
-            .filter(
-                activation=activation,
-                reward_issued=False
-            )
-            .order_by("position", "user_id")[:batch_size]
+        logger.error(
+            "Event resolution failed: %s",
+            str(error)
         )
 
-        processed = 0
-
-        for participant in pending:
-            try:
-                issue_event_gold(participant)
-            except PlayerNotFound:
-                logger.warning(
-                    "Skipping Gold for missing player %s "
-                    "(event %s, version %s, %s Gold).",
-                    participant.user_id,
-                    activation.event_id,
-                    activation.version,
-                    participant.gold_reward
-                )
-
-            EventResolutionParticipant.objects.filter(
-                pk=participant.pk
-            ).update(
-                reward_issued=True
-            )
-
-            participant.reward_issued = True
-            create_event_result_notification(participant)
-            processed += 1
-
-        notification_pending = list(
-            EventResolutionParticipant.objects
-            .filter(
-                activation=activation,
-                reward_issued=True,
-                notification_sent=False
-            )
-            .order_by("position", "user_id")[:batch_size]
-        )
-
-        for participant in notification_pending:
-            create_event_result_notification(participant)
-
-        unfinished = EventResolutionParticipant.objects.filter(
-            activation=activation,
-            reward_issued=False
-        ).exists()
-
-        notifications_pending = EventResolutionParticipant.objects.filter(
-            activation=activation,
-            notification_sent=False
-        ).exists()
-
-        if not unfinished and not notifications_pending:
-
-            with db_transaction.atomic():
-
-                activation = (
-                    EventActivation.objects
-                    .select_for_update()
-                    .get(pk=activation.pk)
-                )
-
-                if activation.resolved_at is None:
-                    activation.resolved_at = timezone.now()
-                    activation.save(
-                        update_fields=["resolved_at"]
-                    )
-
-            return Response({
-                "success": True,
-                "complete": True,
-                "processed": processed,
-                "message": "Event resolution completed."
-            })
-
-        remaining = EventResolutionParticipant.objects.filter(
-            activation=activation,
-            reward_issued=False
-        ).count()
-
-        notification_remaining = EventResolutionParticipant.objects.filter(
-            activation=activation,
-            notification_sent=False
-        ).count()
-
-        return Response({
-            "success": True,
-            "complete": False,
-            "processed": processed,
-            "remaining_rewards": remaining,
-            "remaining_notifications": notification_remaining,
-            "message": "Event resolution is still processing."
-        })
-
-    except Exception:
-        logger.exception(
-            "Failed to process event resolution."
-        )
         return Response(
             {
-                "error": "Event resolution processing failed. It can safely be retried."
+                "success": False,
+                "batch_complete": False,
+                "error": str(error),
+                "message": (
+                    "A player could not be found. "
+                    "The batch was not fully processed and can be retried."
+                )
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_404_NOT_FOUND
         )
-
-
-# ============================================================
-# FIND PENDING ACTIVATIONS
-# ============================================================
-
-@api_view(["GET"])
-def get_pending_event_resolutions(request):
-
-    authenticated, response = control_center_authenticated(request)
-
-    if not authenticated:
-        return response
-
-    try:
-        activations = (
-            EventActivation.objects
-            .filter(
-                ended_at__isnull=False,
-                resolved_at__isnull=True
-            )
-            .order_by("ended_at")
-        )
-
-        # Pull event titles from the latest PublishedSnapshot
-        try:
-            snapshot = PublishedSnapshot.objects.get(data_type="event")
-            event_titles = {
-                str(record.get("data", {}).get("event_id")): record.get("data", {}).get("title", "Unknown Event")
-                for record in snapshot.records
-                if isinstance(record.get("data"), dict)
-            }
-        except PublishedSnapshot.DoesNotExist:
-            event_titles = {}
-
-        pending = []
-
-        for activation in activations:
-            event_id_str = str(activation.event_id)
-            title = event_titles.get(event_id_str, "Unknown Event")
-
-            pending.append({
-                "event_id": event_id_str,
-                "event_title": title,
-                "version": activation.version,
-                "ended_at": activation.ended_at.isoformat(),
-                "results_submitted": (
-                    activation.results_submitted_at is not None
-                )
-            })
-
-        return Response({
-            "success": True,
-            "count": len(pending),
-            "activations": pending
-        })
 
     except Exception:
+
         logger.exception(
-            "Failed to retrieve pending event resolutions."
+            "Failed to process event resolution batch."
         )
+
         return Response(
             {
-                "error": "Unable to retrieve pending event resolutions."
+                "success": False,
+                "batch_complete": False,
+                "message": (
+                    "Batch processing failed. "
+                    "The same batch can safely be retried."
+                )
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
