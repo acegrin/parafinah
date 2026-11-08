@@ -426,7 +426,7 @@ class EventActivation(models.Model):
         ordering = ["version"]
         constraints = [
             models.UniqueConstraint(
-                fields=["event", "version"],
+                fields=["event_id", "version"],
                 name="unique_event_activation_version"
             )
         ]
