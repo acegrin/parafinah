@@ -22,6 +22,7 @@ from .player_admin import delete_player
 from .control_center_admin import  control_center_sync
 from .event_resolution import (
     process_batch_resolution,
+    cleanup_event_resolution_batch,
 )
 
 urlpatterns = [
@@ -69,4 +70,5 @@ urlpatterns = [
     path("control_center/events/resolution/process_batch/", process_batch_resolution, name="control_center_process_batch_resolution"),
 
     path("control_center/sync/", control_center_sync, name="control_center_sync"),
+    path("control_center/events/resolution/cleanup_batch/", cleanup_event_resolution_batch, name="control_center_cleanup_event_resolution_batch"),
 ]

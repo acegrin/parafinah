@@ -14,6 +14,8 @@ from .models import NotificationEntry
 from .firebase_client import db
 from .event_admin import control_center_authenticated
 
+from google.cloud.firestore import FieldFilter
+
 
 logger = logging.getLogger(__name__)
 
@@ -488,6 +490,229 @@ def process_batch_resolution(request):
                     "Batch processing failed. "
                     "The same batch can safely be retried."
                 )
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+
+# ============================================================
+# EVENT RESOLUTION CLEANUP
+# ============================================================
+
+def validate_cleanup_batch(data):
+
+    event_id = data.get("event_id")
+    version = data.get("version")
+    batch_number = data.get("batch_number")
+    total_batches = data.get("total_batches")
+    user_ids = data.get("user_ids")
+
+    if not isinstance(event_id, str) or not event_id.strip():
+        raise ValueError("Invalid event_id.")
+
+    version = validate_integer(version, "version", minimum=1)
+    batch_number = validate_integer(
+        batch_number, "batch_number", minimum=1
+    )
+    total_batches = validate_integer(
+        total_batches, "total_batches", minimum=1
+    )
+
+    if batch_number > total_batches:
+        raise ValueError("batch_number exceeds total_batches.")
+
+    if not isinstance(user_ids, list) or not user_ids:
+        raise ValueError("user_ids must be a non-empty list.")
+
+    if len(user_ids) > 100:
+        raise ValueError("Maximum 100 players per cleanup batch.")
+
+    normalized_ids = []
+
+    for user_id in user_ids:
+
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("Invalid user ID in user_ids.")
+
+        normalized_ids.append(user_id.strip())
+
+    if len(normalized_ids) != len(set(normalized_ids)):
+        raise ValueError("Duplicate user IDs in cleanup batch.")
+
+    return {
+        "event_id": event_id.strip(),
+        "version": version,
+        "batch_number": batch_number,
+        "total_batches": total_batches,
+        "user_ids": normalized_ids
+    }
+
+
+
+def delete_event_economy_records(user_id, event_token):
+
+    economy_ref = (
+        db.collection("playerData")
+        .document(user_id)
+        .collection("economy_events")
+    )
+
+    documents = economy_ref.where(
+        filter=FieldFilter(
+            "eventIds",
+            "array_contains",
+            event_token
+        )
+    ).stream()
+
+    deleted_count = 0
+    updated_count = 0
+
+    batch = db.batch()
+    write_count = 0
+
+    for document in documents:
+
+        data = document.to_dict() or {}
+
+        # Preserve event reward receipts.
+        if (
+            data.get("type") == "event_reward"
+            or str(data.get("runId", "")).startswith("event_reward_")
+            or str(data.get("context", "")).startswith("event_reward:")
+        ):
+            continue
+
+        event_ids = data.get("eventIds", [])
+
+        if not isinstance(event_ids, list):
+            continue
+
+        # Remove only the event currently being cleaned up.
+        remaining_event_ids = [
+            value for value in event_ids
+            if value != event_token
+        ]
+
+        # Nothing remains: delete the economy record.
+        if not remaining_event_ids:
+
+            batch.delete(document.reference)
+            deleted_count += 1
+
+        else:
+
+            # Other events still reference this record.
+            batch.update(
+                document.reference,
+                {"eventIds": remaining_event_ids}
+            )
+
+            updated_count += 1
+
+        write_count += 1
+
+        # Firestore batch safety limit.
+        if write_count >= 450:
+
+            batch.commit()
+
+            batch = db.batch()
+            write_count = 0
+
+    if write_count:
+
+        batch.commit()
+
+    return {
+        "deleted": deleted_count,
+        "updated": updated_count
+    }
+
+
+@api_view(["POST"])
+def cleanup_event_resolution_batch(request):
+
+    authenticated, response = control_center_authenticated(request)
+
+    if not authenticated:
+        return response
+
+    try:
+
+        cleanup = validate_cleanup_batch(request.data)
+
+        event_id = cleanup["event_id"]
+        version = cleanup["version"]
+        batch_number = cleanup["batch_number"]
+        total_batches = cleanup["total_batches"]
+        user_ids = cleanup["user_ids"]
+
+        event_token = f"{event_id}:{version}"
+
+        total_deleted = 0
+        players_processed = 0
+
+        logger.info(
+            "[EventCleanup] Starting cleanup: "
+            "event=%s version=%s batch=%s/%s players=%s",
+            event_id,
+            version,
+            batch_number,
+            total_batches,
+            len(user_ids)
+        )
+
+        for user_id in user_ids:
+
+            deleted_count = delete_event_economy_records(
+                user_id=user_id,
+                event_token=event_token
+            )
+
+            total_deleted += deleted_count
+            players_processed += 1
+
+        logger.info(
+            "[EventCleanup] Completed: "
+            "event=%s version=%s batch=%s deleted=%s players=%s",
+            event_id,
+            version,
+            batch_number,
+            total_deleted,
+            players_processed
+        )
+
+        return Response({
+            "success": True,
+            "cleanup_complete": True,
+            "event_id": event_id,
+            "version": version,
+            "batch_number": batch_number,
+            "total_batches": total_batches,
+            "players_processed": players_processed,
+            "records_deleted": total_deleted
+        })
+
+    except ValueError as error:
+
+        return Response(
+            {"success": False, "error": str(error)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    except Exception:
+
+        logger.exception(
+            "[EventCleanup] Failed to process cleanup batch."
+        )
+
+        return Response(
+            {
+                "success": False,
+                "cleanup_complete": False,
+                "error": "Unable to complete event cleanup batch."
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
