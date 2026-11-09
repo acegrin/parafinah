@@ -40,6 +40,12 @@ class SyncService:
                 "banner": "missions/banners",
             },
         },
+
+        "runner": {
+            "image_fields": {
+                "icon_url": "",
+            },
+        }
     }
 
     def __init__(self):
