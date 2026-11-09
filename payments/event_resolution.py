@@ -652,6 +652,7 @@ def cleanup_event_resolution_batch(request):
         event_token = f"{event_id}:{version}"
 
         total_deleted = 0
+        total_updated = 0
         players_processed = 0
 
         logger.info(
@@ -666,39 +667,51 @@ def cleanup_event_resolution_batch(request):
 
         for user_id in user_ids:
 
-            deleted_count = delete_event_economy_records(
+            result = delete_event_economy_records(
                 user_id=user_id,
                 event_token=event_token
             )
 
-            total_deleted += deleted_count
+            total_deleted += result["deleted"]
+            total_updated += result["updated"]
+
             players_processed += 1
 
         logger.info(
             "[EventCleanup] Completed: "
-            "event=%s version=%s batch=%s deleted=%s players=%s",
+            "event=%s version=%s batch=%s "
+            "deleted=%s updated=%s players=%s",
             event_id,
             version,
             batch_number,
             total_deleted,
+            total_updated,
             players_processed
         )
 
-        return Response({
-            "success": True,
-            "cleanup_complete": True,
-            "event_id": event_id,
-            "version": version,
-            "batch_number": batch_number,
-            "total_batches": total_batches,
-            "players_processed": players_processed,
-            "records_deleted": total_deleted
-        })
+        return Response(
+            {
+                "success": True,
+                "cleanup_complete": True,
+                "event_id": event_id,
+                "version": version,
+                "batch_number": batch_number,
+                "total_batches": total_batches,
+                "players_processed": players_processed,
+                "records_deleted": total_deleted,
+                "records_updated": total_updated
+            },
+            status=status.HTTP_200_OK
+        )
 
     except ValueError as error:
 
         return Response(
-            {"success": False, "error": str(error)},
+            {
+                "success": False,
+                "cleanup_complete": False,
+                "error": str(error)
+            },
             status=status.HTTP_400_BAD_REQUEST
         )
 
