@@ -45,6 +45,12 @@ class SyncService:
             "image_fields": {
                 "icon_url": "",
             },
+        },
+
+        "objective": {
+            "image_fields": {
+                "icon": "",
+            },
         }
     }
 
