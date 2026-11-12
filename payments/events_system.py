@@ -53,22 +53,30 @@ def get_events_manifest(current_manifest_version):
             "new_data_available": False,
         }
 
-    articles = [
-        {
-            "id": str(record["data"]["event_id"]),
-            "updated_at": int(record["updated_at"]),
-        }
-        for record in snapshot.records
-        if isinstance(record.get("data"), dict)
-        and record["data"].get("event_id")
-    ]
+    articles = []
+
+    for record in snapshot.records:
+
+        data = record.get("data")
+
+        if not isinstance(data, dict) or not data.get("event_id"):
+            continue
+
+        event_version = int(
+            data.get("version") or data.get("current_version") or 1
+        )
+
+        articles.append({
+            "id": str(data["event_id"]),
+            "updated_at": int(record.get("updated_at", 0)),
+            "version": event_version,
+        })
 
     return {
         "new_data_available": True,
         "version": state.version,
         "articles": articles,
     }
-
 
 def get_events_article(event_id):
 
@@ -88,9 +96,14 @@ def get_events_article(event_id):
         if str(data.get("event_id")) != str(event_id):
             continue
 
+        event_version = int(
+            data.get("version") or data.get("current_version") or 1
+        )
+
         article = {
             "id": str(data.get("event_id")),
-            "current_version": int(data.get("current_version", 0)),
+            "current_version": event_version,
+            "version": event_version,
             "payload_structure": data.get("payload_structure"),
             "title": data.get("title"),
             "description": data.get("description"),
@@ -102,7 +115,6 @@ def get_events_article(event_id):
             "rewards": json.dumps(data.get("rewards", {})),
             "status": data.get("status"),
             "seen": False,
-            "version": json.dumps(data.get("current_version")),
         }
 
         return JsonResponse(article)
