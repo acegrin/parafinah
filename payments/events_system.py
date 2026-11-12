@@ -102,7 +102,7 @@ def get_events_article(event_id):
             "rewards": json.dumps(data.get("rewards", {})),
             "status": data.get("status"),
             "seen": False,
-            "version": json.dumps(data.get("version")),
+            "version": json.dumps(data.get("current_version")),
         }
 
         return JsonResponse(article)
