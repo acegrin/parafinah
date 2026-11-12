@@ -106,6 +106,7 @@ def get_events_article(event_id):
             "version": event_version,
             "payload_structure": data.get("payload_structure"),
             "title": data.get("title"),
+            "brief": data.get("brief"),
             "description": data.get("description"),
             "banner": data.get("image", ""),
             "start_time": _to_unix_timestamp(data.get("start_time")),
