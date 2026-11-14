@@ -306,8 +306,14 @@ def get_mission_article(article_uid):
         if not isinstance(data, dict):
             raise Http404("Invalid mission record")
 
+        mission_version = int(
+            data.get("version") or data.get("current_version") or 1
+        )
+
         article = {
             "mission_id": data.get("mission_id"),
+            "current_version": mission_version,
+            "version": mission_version,
             "level": data.get("level"),
             "title": data.get("title"),
             "progress_mode": data.get("progress_mode"),
