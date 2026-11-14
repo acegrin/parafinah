@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 @api_view(["POST"])
 @parser_classes([MultiPartParser, FormParser])
-def control_center_sync(request):
+def     control_center_sync(request):
 
     # --------------------------------------------------
     # AUTHENTICATION

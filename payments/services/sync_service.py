@@ -51,6 +51,12 @@ class SyncService:
             "image_fields": {
                 "icon": "",
             },
+        },
+
+        "news": {
+            "image_fields": {
+                "banner": "news/banners",
+            },
         }
     }
 
