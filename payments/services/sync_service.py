@@ -53,11 +53,11 @@ class SyncService:
             },
         },
 
-        "news": {
-            "image_fields": {
-                "banner": "news/banners",
-            },
-        }
+        # "news": {
+        #     "image_fields": {
+        #         "banner": "news/banners",
+        #     },
+        # }
     }
 
     def __init__(self):
