@@ -276,9 +276,14 @@ def get_mission_manifest(current_manifest_version):
         if data.get("mission_type", "STANDARD") != "STANDARD":
             continue
 
+        mission_version = int(
+            data.get("version") or data.get("current_version") or 1
+        )
+
         articles.append({
             "id": str(record["id"]),
             "updated_at": int(record["updated_at"]),
+            "version" : mission_version
         })
 
     return {
