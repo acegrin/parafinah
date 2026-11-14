@@ -1,3 +1,5 @@
+# news_system.py
+
 import json
 
 from django.core.exceptions import ValidationError
@@ -32,6 +34,21 @@ def _as_int(value, default=0):
 
     except (TypeError, ValueError):
         return default
+
+
+def _article_version(data):
+    """
+    Articles published from the Control Center carry a version.
+    Anything without one counts as version 1.
+    """
+
+    return max(
+        1,
+        _as_int(
+            data.get("version") or data.get("current_version"),
+            1
+        )
+    )
 
 
 def _context_string(value):
@@ -72,6 +89,7 @@ def _article_from_data(data):
     return {
         "article_type": data.get("article_type") or "STANDARD",
         "id": str(data.get("id")),
+        "version": _article_version(data),
         "headline": data.get("headline", ""),
         "brief": data.get("brief", ""),
         "content": data.get("content", ""),
@@ -85,11 +103,13 @@ def _article_from_data(data):
 def _article_from_entry(entry):
     """
     Legacy path, used only until the first snapshot is published.
+    NewsEntry has no version, so these articles are version 1.
     """
 
     article = entry.to_dict()
 
     article["id"] = str(article["id"])
+    article["version"] = 1
     article["updated_at"] = int(entry.updated_at.timestamp())
 
     return article
@@ -123,6 +143,7 @@ def get_news_manifest(current_manifest_version):
             {
                 "id": str(item["article_uid"]),
                 "updated_at": int(item["updated_at"].timestamp()),
+                "version": 1,
             }
             for item in NewsEntry.objects.values(
                 "article_uid",
@@ -136,6 +157,7 @@ def get_news_manifest(current_manifest_version):
             {
                 "id": str(data["id"]),
                 "updated_at": _as_int(record.get("updated_at")),
+                "version": _article_version(data),
             }
             for record, data in _snapshot_records(snapshot)
         ]
