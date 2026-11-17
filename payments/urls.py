@@ -1,4 +1,4 @@
-#urls.py
+# urls.py
 
 from django.urls import path
 
@@ -19,7 +19,7 @@ from .mission_admin import create_mission, update_mission, delete_mission
 from .runner_admin import create_runner, update_runner, delete_runner
 from .player_admin import list_players, get_player_detail, get_event_economy_data
 from .player_admin import delete_player
-from .control_center_admin import  control_center_sync
+from .control_center_admin import control_center_sync, control_center_snapshot
 from .event_resolution import (
     process_batch_resolution,
     cleanup_event_resolution_batch,
@@ -43,32 +43,36 @@ urlpatterns = [
     path("get_data_manifest/", get_data_manifest, name="get_data_manifest"),
     path("get_data_row/", get_data_row, name="get_data_row"),
     path("invalidate_runners/", invalidate_runners, name="invalidate_runners"),
-	
-	path("control_center/events/create/", create_event, name="control_center_create_event"),
-	path("control_center/events/update/", update_event, name="control_center_update_event"),
-	path("control_center/events/delete/", delete_event, name="control_center_delete_event"),
 
-	path("control_center/missions/create/", create_mission, name="control_center_create_mission"),
-	path("control_center/missions/update/", update_mission, name="control_center_update_mission"),
-	path("control_center/missions/delete/", delete_mission, name="control_center_delete_mission"),
-	
-	path("control_center/runners/create/", create_runner, name="control_center_create_runner"),
-	path("control_center/runners/update/", update_runner, name="control_center_update_runner"),
-	path("control_center/runners/delete/", delete_runner, name="control_center_delete_runner"),
+    path("control_center/events/create/", create_event, name="control_center_create_event"),
+    path("control_center/events/update/", update_event, name="control_center_update_event"),
+    path("control_center/events/delete/", delete_event, name="control_center_delete_event"),
+
+    path("control_center/missions/create/", create_mission, name="control_center_create_mission"),
+    path("control_center/missions/update/", update_mission, name="control_center_update_mission"),
+    path("control_center/missions/delete/", delete_mission, name="control_center_delete_mission"),
+
+    path("control_center/runners/create/", create_runner, name="control_center_create_runner"),
+    path("control_center/runners/update/", update_runner, name="control_center_update_runner"),
+    path("control_center/runners/delete/", delete_runner, name="control_center_delete_runner"),
 
     path("control_center/events/economy_data/", get_event_economy_data, name="control_center_event_economy_data"),
 
     path("control_center/players/list/", list_players, name="control_center_list_players"),
-    path("control_center/players/detail/", get_player_detail,name="control_center_player_detail"),
+    path("control_center/players/detail/", get_player_detail, name="control_center_player_detail"),
 
     path("control_center/players/delete/", delete_player, name="control_center_delete_player"),
 
     path("control_center/events/activate/", activate_automated_event, name="activate_automated_event"),
 
-    path( "control_center/events/deactivate/", deactivate_automated_event, name="deactivate_automated_event" ),
+    path("control_center/events/deactivate/", deactivate_automated_event, name="deactivate_automated_event"),
 
-    path("control_center/events/resolution/process_batch/", process_batch_resolution, name="control_center_process_batch_resolution"),
+    path("control_center/events/resolution/process_batch/", process_batch_resolution,
+         name="control_center_process_batch_resolution"),
 
     path("control_center/sync/", control_center_sync, name="control_center_sync"),
-    path("control_center/events/resolution/cleanup_batch/", cleanup_event_resolution_batch, name="control_center_cleanup_event_resolution_batch"),
+    path("control_center/snapshot/", control_center_snapshot, name="control_center_snapshot"),
+
+    path("control_center/events/resolution/cleanup_batch/", cleanup_event_resolution_batch,
+         name="control_center_cleanup_event_resolution_batch"),
 ]
