@@ -1,4 +1,3 @@
-
 # payments/services/sync_service.py
 
 import logging
@@ -160,6 +159,44 @@ class SyncService:
                     )
 
             raise
+
+    # --------------------------------------------------
+    # SNAPSHOT DOWNLOAD
+    # --------------------------------------------------
+
+    def get_snapshot(self, data_type):
+        """
+        Returns the records of the last published snapshot for one data
+        type, exactly as they were stored by publish():
+
+            [{"id": "...", "updated_at": 1763400000, "data": {...}}]
+
+        Image fields already hold the public URLs created at upload
+        time. Returns an empty list when nothing was published yet.
+        """
+
+        if data_type not in self.SYNC_CONFIG:
+            raise SyncValidationError(
+                f"Unsupported data_type: {data_type}"
+            )
+
+        snapshot = (
+            PublishedSnapshot.objects
+            .filter(data_type=data_type)
+            .first()
+        )
+
+        if snapshot is None:
+            return []
+
+        records = snapshot.records
+
+        if not isinstance(records, list):
+            raise SyncValidationError(
+                f"The stored {data_type} snapshot is invalid."
+            )
+
+        return records
 
     # --------------------------------------------------
     # RECORD VALIDATION
